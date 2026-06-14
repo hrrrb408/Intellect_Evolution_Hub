@@ -5,13 +5,18 @@ heal_links.py - a closed loop that heals broken wikilinks in an Obsidian vault.
 The loop (this is the whole idea):
     start once, then ON ITS OWN it repeats:
         find a broken link
-        decide the fix  (a plain name match first; Claude only for the unclear ones)
+        decide the fix  (a plain name match - no AI, no API key, no cost)
         write the fix into the note
         run the broken-link check again  ->  a countable score
         repeat until nothing safe is left, the score stops dropping, or the budget runs out
 
 This file IS the loop. vault_health's check is the score. You press start one time.
 It is "closed" on purpose: bounded, safe matches only, a hard recount every pass.
+
+No AI on purpose: this loop only repoints a link when exactly one note is a clear
+name match. Ambiguous links (two or more near matches) and links with no match at
+all are counted and left alone - judgment calls belong to the AI triage loop,
+triage_links.py, which sorts dangling links into keep / create / delete.
 
 Look-only (changes nothing):
     uv run scripts/heal_links.py --path "/vault" --dry-run
@@ -104,7 +109,7 @@ def dry_run(vault):
             safe += 1
     print(f"\nBroken links: {sum(buckets.values())}")
     print(f"  safe to auto-fix right now (no AI): {safe}")
-    print(f"  need Claude to decide: {buckets['ask_claude'] + buckets['no_target']}")
+    print(f"  left for AI triage (ambiguous or no match): {buckets['ask_claude'] + buckets['no_target']}")
     print("\nDRY RUN: nothing changed.\n")
 
 

@@ -15,6 +15,7 @@ import os
 import re
 import urllib.request
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from vault_health import load_vault, check_broken_links
@@ -96,14 +97,21 @@ def apply_verdicts(vault, verdicts, create_cap):
                 deleted += 1
         elif v == "CREATE" and link not in seen_create and created < create_cap:
             seen_create.add(link)
-            stub = vault / "wiki" / "entities" / f"{link}.md"
+            # Triage cannot reliably know the note's type, so it does NOT assert one.
+            # Stubs land in a single holding folder marked `type: stub`; a human or a
+            # later Claude pass classifies and moves them. Link resolution is by
+            # filename, so the stub heals the broken link from here just the same.
+            stub = vault / "wiki" / "stubs" / f"{link}.md"
             if not stub.exists():
                 stub.parent.mkdir(parents=True, exist_ok=True)
+                today = date.today().isoformat()
                 stub.write_text(
-                    f"---\ntype: entity\ntags: [stub]\nai-first: true\n---\n\n"
-                    f"## For future Claude\n\nStub created by link triage on 2026-06-14. "
+                    f"---\ntype: stub\ndate: {today}\ntags: [stub]\nai-first: true\n---\n\n"
+                    f"## For future Claude\n\nStub created by link triage on {today}. "
                     f"`{link}` was referenced across the vault but had no note. "
-                    f"Fill from context when next encountered.\n",
+                    f"Classify it (person, project, concept, decision, etc.), fill it from "
+                    f"context, set the real `type:`, and move it to the matching folder when "
+                    f"you next encounter it.\n",
                     encoding="utf-8")
                 created += 1
     return deleted, created
@@ -131,20 +139,29 @@ def main():
     if not key:
         raise SystemExit("set ANTHROPIC_API_KEY")
     broken = check_broken_links(load_vault(vault), vault)
-    print(f"\nTriaging {min(args.limit, len(broken))} of {len(broken)} dangling links.\n")
-    tally, n = Counter(), 0
+
+    # One verdict per DISTINCT link text. apply_verdicts keys by link text and acts on
+    # every occurrence, so triaging each unique dangling link once (instead of re-asking
+    # for all N occurrences of the same link) is both consistent and cheaper.
+    seen, unique = set(), []
     for iss in broken:
+        m = LINK_IN_MSG.search(iss["message"])
+        if not m or m.group(1) in seen:
+            continue
+        seen.add(m.group(1))
+        unique.append((m.group(1), iss["files"][0]))
+
+    print(f"\nTriaging {min(args.limit, len(unique))} of {len(unique)} distinct dangling links "
+          f"({len(broken)} occurrences).\n")
+    tally, n = Counter(), 0
+    for link, rel in unique:
         if n >= args.limit:
             break
-        m = LINK_IN_MSG.search(iss["message"])
-        if not m:
-            continue
-        link, rel = m.group(1), iss["files"][0]
         verdict, text = ask_claude(Path(rel).stem, line_for(vault, rel, link), link, key)
         tally[verdict] += 1
         n += 1
         print(f"  {verdict:<7} [[{link}]]  ({text.split('-',1)[-1].strip()[:40]})")
-    print(f"\nVerdicts: " + ", ".join(f"{k} {v}" for k, v in tally.most_common()))
+    print("\nVerdicts: " + ", ".join(f"{k} {v}" for k, v in tally.most_common()))
     print("Report only. Nothing changed.\n")
 
 
