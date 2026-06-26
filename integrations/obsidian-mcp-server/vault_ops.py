@@ -139,6 +139,159 @@ def capture_idea(text: str, *, tags: Optional[List[str]] = None) -> Dict[str, An
     return save_note(title, text, note_type="idea", tags=tags or ["idea", "capture"])
 
 
+def update_note(
+    rel: str,
+    *,
+    append: Optional[str] = None,
+    heading: Optional[str] = None,
+    set_fields: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Guarded edit of an EXISTING vault note.
+
+    Deliberately conservative: it appends a section and/or merges scalar
+    frontmatter fields, preserving the rest of the note verbatim. It never
+    creates a note (use save_note), never rewrites the body, never touches list
+    frontmatter (e.g. `tags:` blocks), and refuses paths outside the vault or in
+    protected dirs. Every update stamps `updated: <today>` for provenance.
+    """
+    vault = resolve_vault()
+    rel = (rel or "").strip()
+    if not rel:
+        return {"error": "path is required"}
+    target = (vault / rel).resolve()
+    if vault != target and vault not in target.parents:
+        return {"error": "path is outside the vault"}
+    if set(target.relative_to(vault).parts) & _SKIP_DIRS:
+        return {"error": "path is in a protected directory"}
+    text = _read_safe(target)
+    if text is None:
+        return {"error": f"not found: {rel} (update_note only edits existing notes)"}
+    if not append and not set_fields:
+        return {"error": "nothing to update: provide append and/or set_fields"}
+
+    fm_lines, body, _ = _split_frontmatter(text)
+    fields = {str(k): str(v) for k, v in (set_fields or {}).items()}
+    fields.setdefault("updated", datetime.now().strftime("%Y-%m-%d"))
+    fm_lines = _apply_fields(fm_lines, fields)
+
+    new_body = body
+    if append:
+        section = append.strip()
+        if heading:
+            new_body = new_body.rstrip() + f"\n\n## {heading.strip()}\n\n{section}\n"
+        else:
+            new_body = new_body.rstrip() + f"\n\n{section}\n"
+
+    out = "---\n" + "\n".join(fm_lines).strip("\n") + "\n---\n\n" + new_body.lstrip("\n")
+    target.write_text(out, encoding="utf-8")
+    return {"updated": rel, "set": sorted(fields.keys()), "appended": bool(append)}
+
+
+def validate_note(rel: str) -> Dict[str, Any]:
+    """Check a note against the AI-first rule and for unresolved wikilinks.
+
+    Returns {path, ok, issues}. Issues cover missing frontmatter, missing
+    required keys (type/date/tags/ai-first), a missing `## For future Claude`
+    preamble, and `[[wikilinks]]` whose target note does not exist in the vault.
+    """
+    vault = resolve_vault()
+    rel = (rel or "").strip()
+    if not rel:
+        return {"error": "path is required"}
+    target = (vault / rel).resolve()
+    if vault != target and vault not in target.parents:
+        return {"error": "path is outside the vault"}
+    text = _read_safe(target)
+    if text is None:
+        return {"error": f"not found: {rel}"}
+
+    issues: List[str] = []
+    fm_lines, _, had_fm = _split_frontmatter(text)
+    fmtext = "\n".join(fm_lines)
+    if not had_fm:
+        issues.append("missing frontmatter block")
+    for key in ("type", "date", "tags", "ai-first"):
+        if not re.search(rf"(?mi)^{key}:", fmtext):
+            issues.append(f"missing frontmatter key: {key}")
+    if "## For future Claude" not in text:
+        issues.append("missing '## For future Claude' preamble")
+    index = _stem_index(vault)
+    seen = set()
+    for link in _wikilinks(text):
+        norm = _norm_link(link)
+        if norm and norm not in index and norm not in seen:
+            seen.add(norm)
+            issues.append(f"unresolved wikilink: [[{link}]]")
+    return {"path": rel, "ok": not issues, "issues": issues}
+
+
+def backlinks(target: str) -> Dict[str, Any]:
+    """Find every note that links to `target` via [[wikilink]].
+
+    `target` may be a note title/stem or a vault-relative path; both resolve to
+    the note's stem for matching (aliases `[[Note|alias]]` and folder-qualified
+    links `[[folder/Note]]` are handled).
+    """
+    vault = resolve_vault()
+    key = (target or "").strip()
+    if not key:
+        return {"error": "target is required"}
+    stem = _norm_link(Path(key).name if "/" in key or key.endswith(".md") else key)
+    refs: List[str] = []
+    for i, md in enumerate(_iter_notes(vault)):
+        if i >= _MAX_FILES_SCANNED:
+            break
+        text = _read_safe(md, limit=_MAX_FILE_BYTES) or ""
+        if any(_norm_link(link) == stem for link in _wikilinks(text)):
+            rel = str(md.relative_to(vault))
+            if md.stem.lower() != stem:  # don't list the note itself
+                refs.append(rel)
+    return {"target": stem, "count": len(refs), "backlinks": sorted(refs)}
+
+
+def vault_health() -> Dict[str, Any]:
+    """Bounded structural health summary of the vault.
+
+    Reports counts plus capped samples of orphan notes (no inbound or outbound
+    links), broken wikilinks (target note missing), and notes with no
+    frontmatter. Bounded by the same file cap as search so it stays fast.
+    """
+    vault = resolve_vault()
+    index = _stem_index(vault)
+    note_paths: Dict[str, str] = {}
+    missing_fm: List[str] = []
+    broken: List[Dict[str, str]] = []
+    linked_to: set = set()
+    has_outbound: set = set()
+    count = 0
+    for i, md in enumerate(_iter_notes(vault)):
+        if i >= _MAX_FILES_SCANNED:
+            break
+        count += 1
+        rel = str(md.relative_to(vault))
+        note_paths[md.stem.lower()] = rel
+        text = _read_safe(md, limit=_MAX_FILE_BYTES) or ""
+        if not text.lstrip().startswith("---"):
+            if len(missing_fm) < 10:
+                missing_fm.append(rel)
+        links = _wikilinks(text)
+        if links:
+            has_outbound.add(md.stem.lower())
+        for link in links:
+            norm = _norm_link(link)
+            linked_to.add(norm)
+            if norm and norm not in index and len(broken) < 10:
+                broken.append({"in": rel, "link": link})
+    orphans = [p for s, p in note_paths.items() if s not in linked_to and s not in has_outbound]
+    return {
+        "notes_scanned": count,
+        "capped": count >= _MAX_FILES_SCANNED,
+        "orphans": {"count": len(orphans), "sample": sorted(orphans)[:10]},
+        "broken_links": {"count": len(broken), "sample": broken},
+        "missing_frontmatter": {"count": len(missing_fm), "sample": missing_fm},
+    }
+
+
 # Commands not worth exposing over MCP: meta/setup, Claude-only Google Calendar
 # connector commands, and the niche ones flagged on Issue #60 (challenge, health).
 _EXCLUDED_SKILLS = {
@@ -262,3 +415,55 @@ def _slug(text: str) -> str:
     s = re.sub(r"[^\w\s-]", "", text).strip().lower()
     s = re.sub(r"[\s_-]+", "-", s)
     return s[:80] or "untitled"
+
+
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
+
+
+def _wikilinks(text: str) -> List[str]:
+    """Return the raw target of each [[wikilink]] (before any | alias or # anchor)."""
+    return [m.group(1).strip() for m in _WIKILINK_RE.finditer(text)]
+
+
+def _norm_link(link: str) -> str:
+    """Normalize a wikilink target to a comparable note stem (basename, lowercased)."""
+    return link.split("/")[-1].strip().lower()
+
+
+def _stem_index(vault: Path) -> Dict[str, str]:
+    """Map every note's lowercased stem to its vault-relative path (bounded)."""
+    idx: Dict[str, str] = {}
+    for i, md in enumerate(_iter_notes(vault)):
+        if i >= _MAX_FILES_SCANNED:
+            break
+        idx[md.stem.lower()] = str(md.relative_to(vault))
+    return idx
+
+
+def _split_frontmatter(text: str):
+    """Split into (frontmatter_lines, body, had_frontmatter).
+
+    frontmatter_lines excludes the --- fences; body is everything after them.
+    Preserves raw lines so unknown/list keys survive a round-trip untouched.
+    """
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            fm = text[3:end].strip("\n")
+            body = text[end + 4 :]
+            return fm.splitlines(), body, True
+    return [], text, False
+
+
+def _apply_fields(fm_lines: List[str], fields: Dict[str, str]) -> List[str]:
+    """Set/replace scalar frontmatter keys, preserving every other line as-is."""
+    lines = list(fm_lines)
+    remaining = dict(fields)
+    for i, line in enumerate(lines):
+        m = re.match(r"^([A-Za-z0-9_-]+):", line)
+        if m and m.group(1) in remaining:
+            key = m.group(1)
+            lines[i] = f"{key}: {remaining.pop(key)}"
+    for k, v in remaining.items():
+        lines.append(f"{k}: {v}")
+    return lines

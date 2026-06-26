@@ -232,6 +232,69 @@ def test_mcp_vault_ops_skills_exclude_niche(monkeypatch):
     assert "instructions" in vault_ops.get_skill("obsidian-save")
 
 
+def test_mcp_vault_ops_update_note_guarded_edit(tmp_path, monkeypatch):
+    """update_note appends a section and merges scalar frontmatter on an existing
+    note, preserves the tags block, stamps `updated`, and refuses a path escape
+    and a non-existent note (curator-mode guards, #79)."""
+    vault_ops = _load_vault_ops()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(vault))
+    note = vault / "Project Alpha.md"
+    note.write_text(
+        "---\ntype: project\nstatus: active\ntags:\n  - work\nai-first: true\n---\n\n"
+        "## For future Claude\nAlpha.\n",
+        encoding="utf-8",
+    )
+
+    res = vault_ops.update_note(
+        "Project Alpha.md",
+        append="Shipped the adapter.",
+        heading="Update",
+        set_fields={"status": "done"},
+    )
+    assert res.get("updated") == "Project Alpha.md"
+    text = note.read_text(encoding="utf-8")
+    assert "status: done" in text and "status: active" not in text
+    assert "updated:" in text
+    assert "## Update" in text and "Shipped the adapter." in text
+    assert "  - work" in text  # list frontmatter preserved verbatim
+
+    # Guards: never create, never escape.
+    assert vault_ops.update_note("Nope.md", append="x").get("error")
+    assert vault_ops.update_note("../escape.md", append="x").get("error")
+
+
+def test_mcp_vault_ops_validate_and_backlinks_and_health(tmp_path, monkeypatch):
+    """validate_note flags a missing preamble + unresolved wikilink; backlinks
+    finds the referencing note; vault_health reports the broken link."""
+    vault_ops = _load_vault_ops()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(vault))
+    (vault / "Home.md").write_text(
+        "---\ntype: note\ndate: 2026-06-27\ntags:\n  - x\nai-first: true\n---\n\n"
+        "## For future Claude\nSee [[Project Alpha]] and [[Ghost Note]].\n",
+        encoding="utf-8",
+    )
+    (vault / "Project Alpha.md").write_text(
+        "---\ntype: project\n---\n# Alpha\n",
+        encoding="utf-8",
+    )
+
+    v = vault_ops.validate_note("Project Alpha.md")
+    assert v["ok"] is False
+    joined = " ".join(v["issues"])
+    assert "For future Claude" in joined
+    assert "date" in joined  # missing required key
+
+    bl = vault_ops.backlinks("Project Alpha")
+    assert "Home.md" in bl["backlinks"]
+
+    health = vault_ops.vault_health()
+    assert any(b["link"] == "Ghost Note" for b in health["broken_links"]["sample"])
+
+
 def test_architect_scan_emits_manifest(tmp_path):
     """architect_scan.py must produce a JSON manifest with the expected shape
     on a minimal project (no network, no install)."""

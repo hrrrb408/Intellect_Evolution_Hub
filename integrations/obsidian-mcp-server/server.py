@@ -66,6 +66,59 @@ def obsidian_capture(text: str, tags: list[str] | None = None) -> str:
 
 
 @mcp.tool()
+def obsidian_update_note(
+    path: str,
+    append: str | None = None,
+    heading: str | None = None,
+    set_fields: dict[str, str] | None = None,
+) -> str:
+    """Guarded edit of an EXISTING vault note (curator mode).
+
+    Appends a section (`append`, optionally under a `## heading`) and/or merges
+    scalar frontmatter fields (`set_fields`, e.g. {"status": "done"}). Preserves
+    the rest of the note verbatim, never creates a note, never touches list
+    frontmatter like `tags:`, and refuses paths outside the vault. Stamps
+    `updated` with today's date. To create a new note, use obsidian_save_note.
+    """
+    return json.dumps(
+        vault_ops.update_note(path, append=append, heading=heading, set_fields=set_fields)
+    )
+
+
+@mcp.tool()
+def obsidian_validate_note(path: str) -> str:
+    """Check a note for AI-first compliance and unresolved wikilinks.
+
+    Returns {path, ok, issues}: missing frontmatter or required keys
+    (type/date/tags/ai-first), a missing `## For future Claude` preamble, and
+    any `[[wikilink]]` whose target note does not exist. Use before/after a
+    write to keep the vault self-consistent.
+    """
+    return json.dumps(vault_ops.validate_note(path))
+
+
+@mcp.tool()
+def obsidian_backlinks(target: str) -> str:
+    """List every note that links to `target` via [[wikilink]].
+
+    `target` is a note title/stem or vault-relative path. Use to understand how
+    a note is referenced before editing or to navigate the knowledge graph.
+    """
+    return json.dumps(vault_ops.backlinks(target))
+
+
+@mcp.tool()
+def obsidian_vault_health() -> str:
+    """Bounded structural health check of the vault.
+
+    Returns counts plus capped samples of orphan notes (no links in or out),
+    broken wikilinks (missing target), and notes with no frontmatter. Use to
+    decide what needs curating.
+    """
+    return json.dumps(vault_ops.vault_health())
+
+
+@mcp.tool()
 def obsidian_list_skills() -> str:
     """List the obsidian-second-brain skills (commands) available to run.
 

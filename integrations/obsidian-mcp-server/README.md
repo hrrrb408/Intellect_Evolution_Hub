@@ -19,6 +19,15 @@ Data tools (deterministic primitives):
 | `obsidian_save_note(title, content, type, tags)` | Save a new AI-first note to the vault `Inbox/` |
 | `obsidian_capture(text, tags)` | Quick-capture an idea as a lightweight `type: idea` note |
 
+Curator tools (guarded mutation + graph + health, per Issue #79):
+
+| Tool | What it does |
+|---|---|
+| `obsidian_update_note(path, append, heading, set_fields)` | Guarded edit of an existing note: append a section and/or merge scalar frontmatter; preserves the rest verbatim, never creates, never touches `tags:` blocks, stamps `updated` |
+| `obsidian_validate_note(path)` | Check a note for AI-first compliance (frontmatter keys, `## For future Claude` preamble) and unresolved `[[wikilinks]]` |
+| `obsidian_backlinks(target)` | List every note that links to `target` via `[[wikilink]]` |
+| `obsidian_vault_health()` | Bounded structural summary: orphans, broken wikilinks, notes missing frontmatter (counts + capped samples) |
+
 Skill tools (the higher-level behaviors, per Issue #60 - "use the skills, not just file search"):
 
 | Tool | What it does |
