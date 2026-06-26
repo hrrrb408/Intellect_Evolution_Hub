@@ -33,8 +33,19 @@ adapter_build() {
   _hermes_emit_blueprints "$dst/optional-skills"
   _hermes_copy_references "$src/references" "$dst/references"
   _hermes_copy_scripts "$src/scripts" "$dst/scripts"
+  _hermes_copy_hooks "$src/hooks" "$dst/hooks"
   _hermes_emit_install_hint "$dst"
   _hermes_emit_hooks_doc "$dst"
+}
+
+# Copy the Hermes lifecycle-hook artifacts (the on_session_end maintenance script
+# and its cli-config.yaml template) into the build.
+_hermes_copy_hooks() {
+  local src="$1" dst="$2"
+  [[ -d "$src" ]] || return 0
+  mkdir -p "$dst"
+  [[ -f "$src/obsidian-hermes-session-end.sh" ]] && cp "$src/obsidian-hermes-session-end.sh" "$dst/"
+  [[ -f "$src/hermes-hooks.cli-config.example.yaml" ]] && cp "$src/hermes-hooks.cli-config.example.yaml" "$dst/"
 }
 
 # Read the project version from pyproject.toml so SKILL.md `version:` tracks
@@ -226,20 +237,39 @@ arms as soon as its skill is loaded, and these are opt-in by design. Arm one
 with `hermes skills install <name>`; it then runs unattended on its schedule.
 None of them delete or archive - they only add, update, link.
 
-## PostCompact analog (lifecycle hook) - partly shipped, needs a live-Hermes seam
+## PostCompact analog (lifecycle hook) - shipped
 
-The Claude PostCompact hook fires on context compaction. Two notes on Hermes:
+The Claude PostCompact hook fires on context compaction to propagate the session
+into the vault. Hermes's analog is the `on_session_end` event hook (declared in
+`cli-config.yaml`). This build ships it:
 
-1. **Cron substitute (shipped).** `obsidian-nightly` performs the same
-   consolidation/reconcile/heal pass the PostCompact agent does, on a daily
-   cadence rather than per-compaction. For most users this covers the need.
-2. **True lifecycle hook (open).** If/when Hermes exposes a session-lifecycle
-   event (session end / pre-compaction / background review), wire the existing
-   `scripts/`-backed maintenance logic to it. Preserve the Claude trust model:
-   gate on `OBSIDIAN_VAULT_PATH` plus an explicit enable flag so it ships inert,
-   never deletes, and only adds/updates/links. The exact Hermes hook event name
-   and registration format must be confirmed against a live Hermes runtime -
-   that is the one piece this build cannot verify (tracked in Issue #79).
+- **`hooks/obsidian-hermes-session-end.sh`** - an `on_session_end` hook that, on
+  a completed (non-interrupted) session, runs the `obsidian-nightly`
+  consolidation pass and prints `{}` (the observer-hook contract). It mirrors the
+  Claude bg-agent's trust model exactly: OPT-IN, ships INERT, no-ops unless BOTH
+  `OBSIDIAN_VAULT_PATH` and `OBSIDIAN_HERMES_HOOK_ENABLED=1` are set; add/update
+  /link only, never delete or archive.
+- **`hooks/hermes-hooks.cli-config.example.yaml`** - the paste-in
+  `cli-config.yaml` block registering the hook.
+
+Install:
+
+```bash
+mkdir -p ~/.hermes/agent-hooks
+cp hooks/obsidian-hermes-session-end.sh ~/.hermes/agent-hooks/
+chmod +x ~/.hermes/agent-hooks/obsidian-hermes-session-end.sh
+# merge hooks/hermes-hooks.cli-config.example.yaml into your cli-config.yaml,
+# then: export OBSIDIAN_VAULT_PATH=... OBSIDIAN_HERMES_HOOK_ENABLED=1
+```
+
+**The one unverified seam:** how to invoke Hermes headlessly for the
+consolidation run. The script defaults to `hermes run --quiet` and lets you
+override it with `OBSIDIAN_HERMES_CONSOLIDATE_CMD` if your Hermes version uses a
+different non-interactive entrypoint. The hook wiring, payload parsing, trust
+gate, and stdout contract are all built to the documented `on_session_end` spec;
+confirming the headless invocation on a live Hermes is the remaining check
+(Issue #79). The `obsidian-nightly` cron blueprint covers the same maintenance
+on a daily cadence regardless.
 EOF
 }
 

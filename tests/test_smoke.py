@@ -79,7 +79,12 @@ def test_hermes_build_generates_native_skills():
     assert 'schedule: "0 22 * * *"' in blueprint
     # The opt-in arming surface, not the auto-loaded one.
     assert not (REPO_ROOT / "dist/hermes/skills/scheduled").exists()
-    assert (REPO_ROOT / "dist/hermes/HOOKS.md").is_file()
+    hooks_doc = REPO_ROOT / "dist/hermes/HOOKS.md"
+    assert hooks_doc.is_file()
+    # The on_session_end lifecycle hook (PostCompact analog) and its config ship.
+    assert (REPO_ROOT / "dist/hermes/hooks/obsidian-hermes-session-end.sh").is_file()
+    assert (REPO_ROOT / "dist/hermes/hooks/hermes-hooks.cli-config.example.yaml").is_file()
+    assert "on_session_end" in hooks_doc.read_text(encoding="utf-8")
 
 
 def test_vault_health_json_reports_clean_linked_vault(tmp_path):
