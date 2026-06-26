@@ -28,8 +28,9 @@ def _json_from_stdout(stdout: str) -> dict:
 
 
 def test_codex_cli_build_generates_expected_files():
-    """The codex-cli adapter must emit the AGENTS.md dispatcher and the command
-    bodies. This guards the adapter pipeline that every command change depends on."""
+    """The codex-cli adapter must emit the AGENTS.md manual and one native Codex
+    Agent Skill per command (.agents/skills/<name>/SKILL.md). This guards the
+    adapter pipeline that every command change depends on."""
     result = subprocess.run(
         ["bash", "scripts/build.sh", "--platform", "codex-cli"],
         cwd=REPO_ROOT,
@@ -40,7 +41,12 @@ def test_codex_cli_build_generates_expected_files():
 
     assert result.returncode == 0, result.stderr
     assert (REPO_ROOT / "dist/codex-cli/AGENTS.md").is_file()
-    assert (REPO_ROOT / "dist/codex-cli/.codex/commands/obsidian-save.md").is_file()
+    skill = REPO_ROOT / "dist/codex-cli/.agents/skills/obsidian-save/SKILL.md"
+    assert skill.is_file()
+    # Native skills require name + description frontmatter for discovery.
+    head = skill.read_text(encoding="utf-8")[:400]
+    assert "name: obsidian-save" in head
+    assert "description:" in head
 
 
 def test_vault_health_json_reports_clean_linked_vault(tmp_path):
