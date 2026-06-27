@@ -256,12 +256,39 @@ def test_routes_command_and_fusion_apply_create_stage_scaffolds():
         dry = json.loads(run("--vault", str(vault), "fusion", raw_notes[0].relative_to(vault).as_posix()).stdout)
         assert dry["dry_run"] is True
         assert any(item["action"] == "ensure_moc" for item in dry["proposals"])
+        assert (vault / "wiki/meta/fusion-drafts-latest.md").exists()
+        concept_target = next(item["target_path"] for item in dry["proposals"] if item["action"] == "ensure_concept")
+        query_target = next(item["target_path"] for item in dry["proposals"] if item["action"] == "ensure_query")
+        (vault / concept_target).parent.mkdir(parents=True, exist_ok=True)
+        (vault / concept_target).write_text(
+            "---\ntitle: Old Scaffold\ntype: concept\nai-first: true\n---\n\n"
+            "## For future Claude\n"
+            "This concept page was created by the Compound Vault fusion workflow.\n\n"
+            "# Old Scaffold\n\n- TODO: explain the concept in the user's words.\n",
+            encoding="utf-8",
+        )
+        (vault / query_target).parent.mkdir(parents=True, exist_ok=True)
+        (vault / query_target).write_text(
+            "---\ntitle: Human Query\ntype: question\nai-first: true\n---\n\n"
+            "# Human Query\n\nThis is a human-written learning guide.\n",
+            encoding="utf-8",
+        )
         applied = json.loads(run("--vault", str(vault), "fusion", raw_notes[0].relative_to(vault).as_posix(), "--apply").stdout)
         assert applied["dry_run"] is False
         assert applied["created"] >= 1
+        assert applied["upgraded"] == 0
+        assert "TODO: explain the concept" in (vault / concept_target).read_text(encoding="utf-8")
+        upgraded = json.loads(run("--vault", str(vault), "fusion", raw_notes[0].relative_to(vault).as_posix(), "--apply", "--upgrade-scaffolds").stdout)
+        assert upgraded["upgraded"] >= 1
+        concept_text = (vault / concept_target).read_text(encoding="utf-8")
+        query_text = (vault / query_target).read_text(encoding="utf-8")
+        assert "## 核心理解 / Core Understanding" in concept_text
+        assert "来自源材料的证据 / Evidence" in concept_text
+        assert "This is a human-written learning guide." in query_text
         assert (vault / "mocs/science/neuroscience/index.md").exists()
-        assert list((vault / "queries/science/neuroscience").glob("*.md"))
+        assert (vault / query_target).exists()
         assert (vault / "wiki/meta/fusion-proposals-latest.md").exists()
+        assert (vault / "wiki/meta/fusion-drafts-latest.json").exists()
 
 
 def test_health_reports_pdf_extraction_issues():

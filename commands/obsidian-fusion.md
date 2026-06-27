@@ -2,7 +2,7 @@
 description: Plan or apply IEH/SINGULARITY stage-model source fusion.
 category: meta
 triggers_en: ["fusion proposals", "source fusion", "stage model fusion", "create concept query moc"]
-argument-hint: "[source-note-path] [--apply]"
+argument-hint: "[source-note-path] [--apply] [--upgrade-scaffolds]"
 allowed-tools: Bash, Read
 ---
 
@@ -14,9 +14,14 @@ Default mode is a dry-run. It writes:
 
 - `wiki/meta/fusion-proposals-latest.json`
 - `wiki/meta/fusion-proposals-latest.md`
+- `wiki/meta/fusion-drafts-latest.json`
+- `wiki/meta/fusion-drafts-latest.md`
 
-With `--apply`, it only creates missing stage-model scaffolds and appends MOC
-links. It does not overwrite existing durable notes.
+With `--apply`, it creates missing stage-model pages from reviewable Chinese-first
+drafts and appends MOC links. It does not overwrite existing durable notes.
+
+With `--apply --upgrade-scaffolds`, it may replace existing low-confidence fusion
+scaffolds. Human-written notes are still preserved.
 
 ## Procedure
 
@@ -43,6 +48,8 @@ python3 "$SCRIPT" fusion $ARGUMENTS
 ## Safety rules
 
 - Without `--apply`, no durable stage pages are modified.
-- With `--apply`, existing notes are never overwritten.
-- The command may create missing `concepts/`, `entities/`, `queries/`, and
-  `mocs/` scaffolds, then refresh generated index/hot/chunks.
+- With `--apply`, missing `source-summaries/`, `concepts/`, `entities/`,
+  `queries/`, and `mocs/` pages are created from reviewable drafts.
+- Existing notes are never overwritten unless they are detected as old fusion
+  scaffolds and `--upgrade-scaffolds` is explicitly set.
+- The command refreshes generated index/hot/chunks after writing durable pages.
