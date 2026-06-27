@@ -1177,6 +1177,64 @@ def first_nonempty_lines(text: str, limit: int = 8) -> list[str]:
     return lines
 
 
+def compact_paragraph(text: str, max_chars: int = 700) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned[:max_chars].rstrip()
+
+
+def extract_section_map(text: str, limit: int = 12) -> list[str]:
+    body = strip_frontmatter(text)
+    sections = []
+    for line in body.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("#"):
+            title = s.lstrip("#").strip()
+        elif re.match(r"^(\d+(\.\d+)*|[A-Z])\s+[-. ]+[A-Z][A-Za-z0-9 ,:/()\-]{3,}$", s):
+            title = s
+        elif re.match(r"^[A-Z][A-Z0-9 ,:/()\-]{6,}$", s) and len(s.split()) <= 12:
+            title = s.title()
+        else:
+            continue
+        title = safe_title(title)
+        if title and title.lower() not in {x.lower() for x in sections}:
+            sections.append(title)
+        if len(sections) >= limit:
+            break
+    return sections
+
+
+def extract_named_section_snippet(text: str, names: Sequence[str], max_chars: int = 900) -> str:
+    body = strip_frontmatter(text)
+    pattern = re.compile(r"(?im)^\s*(#{1,6}\s*)?(?:" + "|".join(re.escape(name) for name in names) + r")\b[:.\s-]*$")
+    match = pattern.search(body)
+    if match:
+        start = match.end()
+        rest = body[start:]
+        next_heading = re.search(r"(?m)^\s*(#{1,6}\s+|\d+(\.\d+)*\s+|[A-Z][A-Z0-9 ,:/()\-]{6,}$)", rest)
+        section = rest[:next_heading.start()] if next_heading else rest
+        snippet = compact_paragraph(section, max_chars=max_chars)
+        if snippet:
+            return snippet
+    lower = body.lower()
+    for name in names:
+        idx = lower.find(name.lower())
+        if idx >= 0:
+            return compact_paragraph(body[idx + len(name): idx + len(name) + max_chars], max_chars=max_chars)
+    return ""
+
+
+def build_reading_card(text: str) -> dict[str, object]:
+    return {
+        "abstract": extract_named_section_snippet(text, ["abstract", "摘要"], max_chars=900),
+        "method": extract_named_section_snippet(text, ["method", "methods", "methodology", "approach", "方法"], max_chars=700),
+        "results": extract_named_section_snippet(text, ["results", "experiments", "evaluation", "实验", "结果"], max_chars=700),
+        "conclusion": extract_named_section_snippet(text, ["conclusion", "conclusions", "discussion", "结论"], max_chars=700),
+        "sections": extract_section_map(text),
+    }
+
+
 def write_source_summary(
     vault: Path,
     source_rel: str,
@@ -1195,6 +1253,9 @@ def write_source_summary(
     excerpt = "\n".join(f"> {line[:320]}" for line in excerpt_lines) if excerpt_lines else "> No readable excerpt extracted yet."
     signals = top_signal_terms(source_text)
     signal_line = ", ".join(signals) if signals else "(none yet)"
+    reading = build_reading_card(source_text)
+    sections = reading.get("sections", [])
+    section_lines = [f"- {section}" for section in sections] if sections else ["- (no clear section headings detected)"]
     raw_link = path_to_wikilink(source_rel)
     source_entries = [source_rel]
     if original_rel:
@@ -1230,6 +1291,28 @@ def write_source_summary(
         f"- Domain: `{domain}`",
         f"- Subdomain: `{subdomain}`",
         f"- Signal terms: {signal_line}",
+        "",
+        "## Auto Reading Card",
+        "",
+        "### Abstract / 摘要",
+        "",
+        str(reading.get("abstract") or "Not detected. Fill this after reading the source."),
+        "",
+        "### Method / 方法",
+        "",
+        str(reading.get("method") or "Not detected. Fill this after reading the source."),
+        "",
+        "### Results / Evidence",
+        "",
+        str(reading.get("results") or "Not detected. Fill this after reading the source."),
+        "",
+        "### Conclusion / Takeaway",
+        "",
+        str(reading.get("conclusion") or "Not detected. Fill this after reading the source."),
+        "",
+        "### Section Map",
+        "",
+        *section_lines,
         "",
         "## Initial Reading Judgment",
         "",

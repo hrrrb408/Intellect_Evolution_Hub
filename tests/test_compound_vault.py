@@ -295,6 +295,28 @@ def test_health_reports_pdf_extraction_issues():
         assert "PDF extraction issues: 1" in (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
 
 
+def test_source_summary_extracts_reading_card_sections():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        source = vault / "paper.md"
+        source.write_text(
+            "# Retrieval Memory Paper\n\n"
+            "## Abstract\n\nThis paper studies retrieval memory for language model agents under distribution shift.\n\n"
+            "## Method\n\nThe method combines chunked retrieval, reranking, and a persistent memory bank.\n\n"
+            "## Conclusion\n\nRetrieval memory improves adaptation when the source context is preserved.\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+        summary = next((vault / "source-summaries/engineering/ai-engineering").glob("*.md"))
+        text = summary.read_text(encoding="utf-8")
+        assert "## Auto Reading Card" in text
+        assert "retrieval memory for language model agents" in text
+        assert "persistent memory bank" in text
+        assert "Retrieval Memory Paper" in text
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
