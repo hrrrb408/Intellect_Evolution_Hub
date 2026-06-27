@@ -251,6 +251,10 @@ def file_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
+def bytes_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 def meta_dir(vault: Path) -> Path:
     return vault / ".vault-meta"
 
@@ -317,7 +321,71 @@ def is_singularity_mode(vault: Path) -> bool:
     return mode_config(vault)["mode"] == "singularity"
 
 
-def route_path(vault: Path, note_type: str, title: str) -> str:
+DOMAIN_RULES: list[tuple[str, str, tuple[str, ...]]] = [
+    ("engineering", "ai-engineering", (
+        "clip", "llm", "language model", "foundation model", "test-time adaptation",
+        "distribution shift", "vision", "neural", "transformer", "machine learning",
+        "deep learning", "retrieval", "embedding", "rag", "agent", "ai ",
+    )),
+    ("engineering", "python", ("python", "fastapi", "pydantic", "django", "flask")),
+    ("engineering", "java", ("java", "spring", "spring boot", "jvm", "maven")),
+    ("engineering", "computer-network", ("tcp", "ip", "network", "http", "dns", "routing")),
+    ("finance", "markets", ("finance", "market", "asset", "portfolio", "trading", "volatility", "stock")),
+    ("medicine", "psychiatry", ("adhd", "psychiatry", "depression", "clinical", "diagnosis")),
+    ("medicine", "public-health", ("public health", "epidemiology", "hospital", "patient")),
+    ("science", "cognitive-science", ("cognitive", "attention", "memory", "perception")),
+    ("business", "strategy", ("strategy", "market positioning", "customer", "revenue", "product-market")),
+    ("life", "career", ("career", "interview", "resume", "导师", "advisor")),
+]
+
+
+def infer_domain_subdomain(title: str, text: str = "", source: str = "") -> tuple[str, str]:
+    haystack = f"{title}\n{source}\n{text[:8000]}".lower()
+    best: tuple[int, str, str] = (0, "engineering", "ai-engineering")
+    for domain, subdomain, keywords in DOMAIN_RULES:
+        score = sum(1 for keyword in keywords if keyword in haystack)
+        if score > best[0]:
+            best = (score, domain, subdomain)
+    return best[1], best[2]
+
+
+def top_signal_terms(text: str, limit: int = 12) -> list[str]:
+    stop = {
+        "the", "and", "for", "with", "that", "this", "from", "are", "was", "were",
+        "have", "has", "into", "using", "use", "our", "their", "there", "these",
+        "those", "under", "between", "about", "which", "what", "when", "where",
+        "一个", "这种", "可以", "以及", "通过", "进行", "问题", "方法", "研究",
+    }
+    counts = Counter(t for t in tokenize(text) if len(t) > 2 and t not in stop)
+    return [term for term, _ in counts.most_common(limit)]
+
+
+def paper_sidecar_text(path: Path, digest: str) -> str:
+    stat = path.stat()
+    return textwrap.dedent(f"""\
+    # {path.stem}
+
+    ## Original PDF
+
+    - Path: `{path}`
+    - Size bytes: {stat.st_size}
+    - Hash: `{digest}`
+
+    ## Extracted Text
+
+    No text extraction was performed by `compound_vault.py`. Preserve this companion note as the raw source pointer, then add extracted text or a human reading summary under `source-summaries/`.
+    """).strip()
+
+
+def copy_original_pdf(vault: Path, path: Path, domain: str, subdomain: str, title: str) -> str:
+    target = vault / "raw" / "papers" / domain / subdomain / f"{slugify(title)}.pdf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or bytes_hash(target.read_bytes()) != bytes_hash(path.read_bytes()):
+        shutil.copy2(path, target)
+    return rel(vault, target)
+
+
+def route_path(vault: Path, note_type: str, title: str, domain: str | None = None, subdomain: str | None = None) -> str:
     mode = mode_config(vault)["mode"]
     slug = slugify(title)
     raw = safe_title(title, slug)
@@ -336,20 +404,22 @@ def route_path(vault: Path, note_type: str, title: str) -> str:
         }
         return mapping.get(note_type, f"wiki/resources/incoming/{slug}.md")
     if mode == "singularity":
+        domain = slugify(domain or infer_domain_subdomain(title)[0])
+        subdomain = slugify(subdomain or infer_domain_subdomain(title)[1])
         mapping = {
-            "source": f"raw/articles/engineering/ai-engineering/{slug}.md",
-            "entity": f"entities/engineering/ai-engineering/{slug}.md",
-            "concept": f"concepts/engineering/ai-engineering/{slug}.md",
-            "project": f"concepts/engineering/ai-engineering/{slug}.md",
-            "decision": f"queries/engineering/ai-engineering/{slug}.md",
-            "question": f"queries/engineering/ai-engineering/{slug}.md",
-            "session": f"source-summaries/engineering/ai-engineering/{slug}.md",
-            "source-summary": f"source-summaries/engineering/ai-engineering/{slug}.md",
-            "research": f"queries/engineering/ai-engineering/{slug}.md",
-            "comparison": f"comparisons/engineering/ai-engineering/{slug}.md",
-            "moc": f"mocs/engineering/ai-engineering/{slug}.md",
+            "source": f"raw/articles/{domain}/{subdomain}/{slug}.md",
+            "entity": f"entities/{domain}/{subdomain}/{slug}.md",
+            "concept": f"concepts/{domain}/{subdomain}/{slug}.md",
+            "project": f"concepts/{domain}/{subdomain}/{slug}.md",
+            "decision": f"queries/{domain}/{subdomain}/{slug}.md",
+            "question": f"queries/{domain}/{subdomain}/{slug}.md",
+            "session": f"source-summaries/{domain}/{subdomain}/{slug}.md",
+            "source-summary": f"source-summaries/{domain}/{subdomain}/{slug}.md",
+            "research": f"queries/{domain}/{subdomain}/{slug}.md",
+            "comparison": f"comparisons/{domain}/{subdomain}/{slug}.md",
+            "moc": f"mocs/{domain}/{subdomain}/{slug}.md",
         }
-        return mapping.get(note_type, f"raw/articles/engineering/ai-engineering/{slug}.md")
+        return mapping.get(note_type, f"raw/articles/{domain}/{subdomain}/{slug}.md")
     if mode == "zettelkasten":
         zettel_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M%S%f")
         return f"wiki/{zettel_id}-{slug}.md"
@@ -977,40 +1047,67 @@ def first_nonempty_lines(text: str, limit: int = 8) -> list[str]:
     return lines
 
 
-def write_source_summary(vault: Path, source_rel: str, title: str, source_text: str) -> str:
+def write_source_summary(
+    vault: Path,
+    source_rel: str,
+    title: str,
+    source_text: str,
+    domain: str = "engineering",
+    subdomain: str = "ai-engineering",
+    original_rel: str = "",
+) -> str:
     if not is_singularity_mode(vault):
         return ""
-    path = vault / route_path(vault, "source-summary", title)
+    path = vault / route_path(vault, "source-summary", title, domain=domain, subdomain=subdomain)
     if path.exists():
         return rel(vault, path)
     excerpt_lines = first_nonempty_lines(source_text, limit=6)
     excerpt = "\n".join(f"> {line[:320]}" for line in excerpt_lines) if excerpt_lines else "> No readable excerpt extracted yet."
+    signals = top_signal_terms(source_text)
+    signal_line = ", ".join(signals) if signals else "(none yet)"
+    raw_link = path_to_wikilink(source_rel)
+    source_entries = [f"  - {source_rel}"]
+    if original_rel:
+        source_entries.insert(0, f"  - {original_rel}")
+    source_yaml = "\n".join(source_entries)
+    original_line = f"- Original file: `{original_rel}`" if original_rel else "- Original file: same as raw source note"
     body = textwrap.dedent(f"""\
     ---
     title: "{safe_title(title).replace('"', "'")}"
     type: source-summary
     date: {today()}
     updated: {today()}
+    domain: {domain}
+    subdomain: {subdomain}
     confidence: low
     ai-first: true
     sources:
-      - {source_rel}
+    {source_yaml}
     ---
 
     ## For future Claude
-    This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source.
+    This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source and original file.
 
     # {safe_title(title)}
 
-    ## Source
+    ## Source Trail
 
-    - Raw source: `{source_rel}`
+    - Raw source note: {raw_link}
+    - Raw source path: `{source_rel}`
+    {original_line}
 
-    ## Initial Reading Scaffold
+    ## Routing
+
+    - Domain: `{domain}`
+    - Subdomain: `{subdomain}`
+    - Signal terms: {signal_line}
+
+    ## Initial Reading Judgment
 
     - What problem does this source address?
     - What claims, definitions, methods, or entities should become durable pages?
     - What should be linked into the relevant MOC or query page?
+    - Is this source primarily raw material, a paper, a transcript, a study note, or a decision artifact?
 
     ## Extracted Opening
 
@@ -1021,6 +1118,7 @@ def write_source_summary(vault: Path, source_rel: str, title: str, source_text: 
     - [ ] Confirm the title and source identity.
     - [ ] Write a concise Chinese-first summary.
     - [ ] Extract reusable concepts and entities.
+    - [ ] Create a query page if the source is part of a learning or research direction.
     - [ ] Add this source to the relevant query page and MOC.
     """).rstrip() + "\n"
     write_text(path, body)
@@ -1238,18 +1336,37 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     src = args.source
     source_kind = "url" if re.match(r"https?://", src) else "file"
     content_type = ""
+    original_rel = ""
+    is_pdf_source = False
     if source_kind == "url":
         raw, content_type = read_url(src)
         base = slugify(src)
+        is_pdf_source = "pdf" in content_type.lower() or urllib.parse.urlparse(src).path.lower().endswith(".pdf")
     else:
         p = Path(src).expanduser().resolve()
         if not p.exists():
             print(f"Source not found: {p}", file=sys.stderr)
             return 2
-        raw = safe_read(p, limit_bytes=args.max_bytes)
         base = slugify(p.stem)
+        is_pdf_source = p.suffix.lower() == ".pdf"
+        if is_pdf_source:
+            pdf_bytes = p.read_bytes()
+            digest = bytes_hash(pdf_bytes)
+            title_for_pdf = safe_title(p.stem)
+            domain, subdomain = infer_domain_subdomain(title_for_pdf, "", src)
+            original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
+            raw = paper_sidecar_text(p, digest)
+        else:
+            raw = safe_read(p, limit_bytes=args.max_bytes)
     text = normalize_source_text(raw, src, content_type)
-    digest = file_hash(text)
+    title = extract_title(Path(base + ".md"), text) or base
+    domain, subdomain = infer_domain_subdomain(title, text, src) if is_singularity_mode(vault) else ("", "")
+    if source_kind == "url" and is_pdf_source:
+        digest = file_hash(text)
+        title_for_pdf = safe_title(title)
+        original_rel = f"external-pdf:{src}"
+    elif not is_pdf_source:
+        digest = file_hash(text)
     manifest = load_manifest(vault)
     source_key = f"{source_kind}:{src}"
     existing = manifest["sources"].get(source_key)
@@ -1257,13 +1374,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print(f"Already ingested unchanged source: {existing.get('source_note')}")
         print("Use --force to re-ingest.")
         return 0
-    routed = route_path(vault, "source", f"{today()}-{base}-{digest[:8]}")
+    routed = route_path(vault, "source", f"{today()}-{base}-{digest[:8]}", domain=domain or None, subdomain=subdomain or None)
     out = vault / routed
-    title = extract_title(Path(base + ".md"), text) or base
     ingested_at = now().strftime(DATETIME_FMT)
     if is_singularity_mode(vault):
         checklist = [
-            "- [ ] Confirm this belongs under `raw/articles/` or move the original file to `raw/papers/` when it is a PDF.",
+            "- [ ] Confirm this belongs under the inferred domain/subdomain.",
+            "- [ ] If this is a PDF, verify the preserved original under `raw/papers/`.",
             "- [ ] Complete the matching `source-summaries/` page.",
             "- [ ] Extract entities into `entities/`.",
             "- [ ] Extract concepts or comparisons into `concepts/` or `comparisons/`.",
@@ -1283,8 +1400,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         f'title: "{title.replace(chr(34), chr(39))}"',
         "type: source",
         f"date: {today()}",
+        *( [f"domain: {domain}", f"subdomain: {subdomain}"] if is_singularity_mode(vault) else [] ),
         f'source: "{src.replace(chr(34), chr(39))}"',
         f"source_kind: {source_kind}",
+        f"source_format: {'pdf' if is_pdf_source else 'text'}",
+        *( [f"original_file: {original_rel}"] if original_rel else [] ),
         f"ingested: {ingested_at}",
         f"content_hash: {digest}",
         "status: raw-ingested",
@@ -1299,6 +1419,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "## Source",
         "",
         f"- Original: {src}",
+        *( [f"- Preserved original: `{original_rel}`"] if original_rel else [] ),
+        *( [f"- Inferred route: `{domain}/{subdomain}`"] if is_singularity_mode(vault) else [] ),
         f"- Ingested: {ingested_at}",
         f"- Hash: `{digest}`",
         "",
@@ -1312,7 +1434,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     ]).rstrip() + "\n"
     write_text(out, body)
     source_rel = rel(vault, out)
-    summary_rel = write_source_summary(vault, source_rel, title, text)
+    summary_rel = write_source_summary(vault, source_rel, title, text, domain=domain or "engineering", subdomain=subdomain or "ai-engineering", original_rel=original_rel)
     distributed = distribute_ingest(vault, source_rel, text) if args.distribute else {"entities": [], "concepts": []}
     build_index(vault)
     build_chunk_index(vault)
@@ -1325,6 +1447,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "ingested_at": now().strftime(DATETIME_FMT),
         "source_note": source_rel,
         "source_summary": summary_rel,
+        "source_format": "pdf" if is_pdf_source else "text",
+        "original_file": original_rel,
+        "domain": domain,
+        "subdomain": subdomain,
         "distributed": distributed,
         "rewrite_plan": rewrite_plan,
         "analysis": analysis.get("paths", {}) if isinstance(analysis, dict) else {},

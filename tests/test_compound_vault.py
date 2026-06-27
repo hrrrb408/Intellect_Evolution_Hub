@@ -164,6 +164,41 @@ def test_singularity_mode_ingest_uses_stage_model():
         assert "wiki/resources/concepts/Test-Time Adaptation Paper.md" not in index_text
 
 
+def test_singularity_mode_routes_by_domain_and_preserves_pdf():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        finance_source = vault / "markets.md"
+        finance_source.write_text(
+            "# Portfolio Volatility Note\n\nThis finance note studies market volatility, asset allocation, trading risk, and portfolio construction.\n",
+            encoding="utf-8",
+        )
+        fake_pdf = vault / "clip-paper.pdf"
+        fake_pdf.write_bytes(b"%PDF-1.4\nfake clip foundation model distribution shift paper\n%%EOF\n")
+
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        run("--vault", str(vault), "ingest", str(finance_source), "--no-distribute")
+        finance_notes = list((vault / "raw/articles/finance/markets").glob("*.md"))
+        finance_summaries = list((vault / "source-summaries/finance/markets").glob("*.md"))
+        assert finance_notes
+        assert finance_summaries
+        assert "domain: finance" in finance_notes[0].read_text(encoding="utf-8")
+        assert "Subdomain: `markets`" in finance_summaries[0].read_text(encoding="utf-8")
+
+        run("--vault", str(vault), "ingest", str(fake_pdf), "--no-distribute")
+        pdf_notes = list((vault / "raw/articles/engineering/ai-engineering").glob("*clip-paper*.md"))
+        pdf_files = list((vault / "raw/papers/engineering/ai-engineering").glob("*clip-paper*.pdf"))
+        pdf_summaries = list((vault / "source-summaries/engineering/ai-engineering").glob("*clip-paper*.md"))
+        assert pdf_notes
+        assert pdf_files
+        assert pdf_summaries
+        note_text = pdf_notes[0].read_text(encoding="utf-8")
+        summary_text = pdf_summaries[0].read_text(encoding="utf-8")
+        assert "source_format: pdf" in note_text
+        assert "Preserved original: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in note_text
+        assert "Original file: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in summary_text
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
