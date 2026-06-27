@@ -380,23 +380,36 @@ def write_stub(vault: Path, note_type: str, title: str, source_rel: str, reason:
 
 
 def extract_ingest_candidates(text: str) -> tuple[list[str], list[str]]:
-    wikilinks = [safe_title(x) for x in WIKILINK_RE.findall(text)]
+    candidate_text = strip_frontmatter(text)
+    candidate_text = re.split(r"\n\s*(references|bibliography)\s*\n", candidate_text, maxsplit=1, flags=re.I)[0]
+    candidate_text = candidate_text[:20000]
+    wikilinks = [safe_title(x) for x in WIKILINK_RE.findall(candidate_text)]
     headings = []
-    for line in strip_frontmatter(text).splitlines():
+    ignored_headings = {
+        "raw content", "source", "future claude extraction checklist",
+        "purpose in ieh", "original pdf", "extracted text",
+    }
+    for line in candidate_text.splitlines():
         if line.startswith("## "):
-            headings.append(safe_title(line[3:]))
+            heading = safe_title(line[3:])
+            if not re.fullmatch(r"Page \d+", heading):
+                headings.append(heading)
         elif line.startswith("# ") and len(headings) < 1:
             headings.append(safe_title(line[2:]))
-    title_case = re.findall(r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,4})\b", text)
+    title_case = re.findall(r"\b([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){1,4})\b", candidate_text[:8000])
     concepts = []
     for item in headings:
-        if item and item.lower() not in {"raw content", "source", "future claude extraction checklist"}:
+        if item and item.lower() not in ignored_headings:
             concepts.append(item)
     concept_set = {item.lower() for item in concepts}
     entities = []
+    ignored_entities = ignored_headings | {
+        "abstract machine", "abstract many", "acknowledgements the",
+        "additional experimental results", "appendix table",
+    }
     for item in wikilinks + title_case:
         item = safe_title(item)
-        if item and item.lower() not in {"raw content", "future claude", "source"} and item.lower() not in concept_set:
+        if item and item.lower() not in ignored_entities and item.lower() not in concept_set:
             entities.append(item)
     return sorted(set(entities))[:12], sorted(set(concepts))[:12]
 
@@ -1248,71 +1261,72 @@ def build_chunk_index(vault: Path) -> dict[str, object]:
     meta = meta_dir(vault)
     chunks_root = meta / "chunks"
     bm25_root = meta / "bm25"
-    if chunks_root.exists():
-        shutil.rmtree(chunks_root)
-    chunks_root.mkdir(parents=True, exist_ok=True)
-    bm25_root.mkdir(parents=True, exist_ok=True)
+    with file_lock(meta / "chunk-index.lock"):
+        if chunks_root.exists():
+            shutil.rmtree(chunks_root)
+        chunks_root.mkdir(parents=True, exist_ok=True)
+        bm25_root.mkdir(parents=True, exist_ok=True)
 
-    docs = {}
-    df = Counter()
-    postings: dict[str, list[list[object]]] = defaultdict(list)
-    chunk_count = 0
+        docs = {}
+        df = Counter()
+        postings: dict[str, list[list[object]]] = defaultdict(list)
+        chunk_count = 0
 
-    for path in sorted(iter_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
-        try:
-            text = safe_read(path)
-            info = analyze_note(vault, path)
-        except Exception:
-            continue
-        page_hash = file_hash(rel(vault, path))
-        page_dir = chunks_root / page_hash
-        page_dir.mkdir(parents=True, exist_ok=True)
-        for idx, raw_chunk in enumerate(chunk_text(text)):
-            body_hash = file_hash(raw_chunk)
-            chunk_id = f"{page_hash}:{idx}"
-            contextualized = f"{info.title}\n{info.note_type}\n{info.summary}\n\n{raw_chunk}"
-            chunk_payload = {
-                "chunk_id": chunk_id,
-                "page_address": page_hash,
-                "page_path": rel(vault, path),
-                "page_title": info.title,
-                "chunk_index": idx,
-                "raw_text": raw_chunk,
-                "contextualized_text": contextualized,
-                "body_hash": body_hash,
-            }
-            chunk_path = page_dir / f"chunk-{idx:03d}.json"
-            write_text(chunk_path, json.dumps(chunk_payload, ensure_ascii=False, indent=2) + "\n")
-            tokens = tokenize(contextualized)
-            tf = Counter(tokens)
-            docs[chunk_id] = {
-                "path": rel(vault, chunk_path),
-                "page_path": rel(vault, path),
-                "page_title": info.title,
-                "chunk_index": idx,
-                "dl": len(tokens),
-            }
-            for term, count in tf.items():
-                df[term] += 1
-                postings[term].append([chunk_id, count])
-            chunk_count += 1
+        for path in sorted(iter_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
+            try:
+                text = safe_read(path)
+                info = analyze_note(vault, path)
+            except Exception:
+                continue
+            page_hash = file_hash(rel(vault, path))
+            page_dir = chunks_root / page_hash
+            page_dir.mkdir(parents=True, exist_ok=True)
+            for idx, raw_chunk in enumerate(chunk_text(text)):
+                body_hash = file_hash(raw_chunk)
+                chunk_id = f"{page_hash}:{idx}"
+                contextualized = f"{info.title}\n{info.note_type}\n{info.summary}\n\n{raw_chunk}"
+                chunk_payload = {
+                    "chunk_id": chunk_id,
+                    "page_address": page_hash,
+                    "page_path": rel(vault, path),
+                    "page_title": info.title,
+                    "chunk_index": idx,
+                    "raw_text": raw_chunk,
+                    "contextualized_text": contextualized,
+                    "body_hash": body_hash,
+                }
+                chunk_path = page_dir / f"chunk-{idx:03d}.json"
+                write_text(chunk_path, json.dumps(chunk_payload, ensure_ascii=False, indent=2) + "\n")
+                tokens = tokenize(contextualized)
+                tf = Counter(tokens)
+                docs[chunk_id] = {
+                    "path": rel(vault, chunk_path),
+                    "page_path": rel(vault, path),
+                    "page_title": info.title,
+                    "chunk_index": idx,
+                    "dl": len(tokens),
+                }
+                for term, count in tf.items():
+                    df[term] += 1
+                    postings[term].append([chunk_id, count])
+                chunk_count += 1
 
-    avg_dl = (sum(doc["dl"] for doc in docs.values()) / len(docs)) if docs else 0
-    index = {
-        "schema_version": 1,
-        "params": {"k1": 1.5, "b": 0.75},
-        "doc_count": len(docs),
-        "chunk_count": chunk_count,
-        "avg_dl": avg_dl,
-        "updated_at": now().strftime(DATETIME_FMT),
-        "vocab": {
-            term: {"df": df[term], "postings": postings[term]}
-            for term in sorted(df)
-        },
-        "docs": docs,
-    }
-    save_json(bm25_root / "index.json", index)
-    return index
+        avg_dl = (sum(doc["dl"] for doc in docs.values()) / len(docs)) if docs else 0
+        index = {
+            "schema_version": 1,
+            "params": {"k1": 1.5, "b": 0.75},
+            "doc_count": len(docs),
+            "chunk_count": chunk_count,
+            "avg_dl": avg_dl,
+            "updated_at": now().strftime(DATETIME_FMT),
+            "vocab": {
+                term: {"df": df[term], "postings": postings[term]}
+                for term in sorted(df)
+            },
+            "docs": docs,
+        }
+        save_json(bm25_root / "index.json", index)
+        return index
 
 
 def load_chunk_payload(vault: Path, rel_path: str) -> dict[str, object] | None:
