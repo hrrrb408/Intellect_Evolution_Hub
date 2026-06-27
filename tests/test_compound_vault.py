@@ -130,7 +130,33 @@ def test_mode_routing_and_chunks():
         assert payload["chunk_count"] >= 1
 
 
+def test_nested_git_repositories_are_not_vault_notes():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        nested = vault / "nested-project"
+        (nested / ".git").mkdir(parents=True)
+        (nested / "README.md").write_text(
+            "# Nested Project\n\nThis markdown belongs to a nested repository, not the vault.\n",
+            encoding="utf-8",
+        )
+        note = vault / "wiki/concepts/Vault Note.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(
+            "---\ntitle: Vault Note\ntype: concept\nai-first: true\n---\n\n## For future Claude\nReal vault note.\n\n# Vault Note\n\nNested repository content should not be indexed.\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "index")
+        index_text = (vault / "wiki/index.md").read_text(encoding="utf-8")
+        assert "nested-project/README.md" not in index_text
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert "nested-project/README.md" not in health["missing_frontmatter"]
+        query = json.loads(run("--vault", str(vault), "query", "Nested Project", "--refresh", "--rerank", "none").stdout)
+        assert all(hit["path"] != "nested-project/README.md" for hit in query)
+
+
 if __name__ == "__main__":
     test_init_ingest_query_health()
     test_mode_routing_and_chunks()
+    test_nested_git_repositories_are_not_vault_notes()
     print("ok")
