@@ -130,6 +130,40 @@ def test_mode_routing_and_chunks():
         assert payload["chunk_count"] >= 1
 
 
+def test_singularity_mode_ingest_uses_stage_model():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        source = vault / "paper.md"
+        source.write_text(
+            "# Test-Time Adaptation Paper\n\nThis paper studies test-time adaptation under distribution shift for robust visual recognition.\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        routed = run("--vault", str(vault), "mode", "route", "source", "Test-Time Adaptation Paper")
+        assert "raw/articles/engineering/ai-engineering/test-time-adaptation-paper.md" in routed.stdout
+
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+        legacy = vault / "wiki/resources/concepts/Test-Time Adaptation Paper.md"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(
+            "---\ntitle: Test-Time Adaptation Paper\ntype: concept\nai-first: true\n---\n\n# Test-Time Adaptation Paper\n\nLegacy compatibility content.\n",
+            encoding="utf-8",
+        )
+        raw_notes = list((vault / "raw/articles/engineering/ai-engineering").glob("*.md"))
+        summaries = list((vault / "source-summaries/engineering/ai-engineering").glob("*.md"))
+        assert raw_notes
+        assert summaries
+        raw_text = raw_notes[0].read_text(encoding="utf-8")
+        summary_text = summaries[0].read_text(encoding="utf-8")
+        assert "Complete the matching `source-summaries/` page" in raw_text
+        assert "sources:\n  - raw/articles/engineering/ai-engineering/" in summary_text
+        run("--vault", str(vault), "index")
+        index_text = (vault / "wiki/index.md").read_text(encoding="utf-8")
+        assert "source-summary" in index_text
+        assert "wiki/resources/concepts/Test-Time Adaptation Paper.md" not in index_text
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)

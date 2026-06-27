@@ -51,8 +51,8 @@ LOCK_SLEEP_SECONDS = float(os.environ.get("COMPOUND_LOCK_SLEEP_SECONDS", "0.1"))
 LOCK_TIMEOUT_SECONDS = float(os.environ.get("COMPOUND_LOCK_TIMEOUT_SECONDS", "30"))
 CHUNK_TARGET_CHARS = int(os.environ.get("COMPOUND_CHUNK_TARGET_CHARS", "2400"))
 CHUNK_OVERLAP_CHARS = int(os.environ.get("COMPOUND_CHUNK_OVERLAP_CHARS", "300"))
-VALID_MODES = {"generic", "lyt", "para", "zettelkasten"}
-VALID_ROUTE_TYPES = {"source", "entity", "concept", "project", "decision", "question", "session", "research"}
+VALID_MODES = {"generic", "lyt", "para", "zettelkasten", "singularity"}
+VALID_ROUTE_TYPES = {"source", "entity", "concept", "project", "decision", "question", "session", "research", "source-summary", "comparison", "moc"}
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = os.environ.get("COMPOUND_OLLAMA_MODEL", "nomic-embed-text")
 OLLAMA_TIMEOUT_SEC = float(os.environ.get("COMPOUND_OLLAMA_TIMEOUT_SEC", "3"))
@@ -192,6 +192,8 @@ def iter_markdown(vault: Path, include_generated: bool = True) -> Iterator[Path]
             r = rel(vault, path)
             if r in {"wiki/index.md", "wiki/hot.md", "wiki/log.md"} or r.startswith("wiki/meta/"):
                 continue
+            if is_singularity_mode(vault) and r.startswith("wiki/resources/"):
+                continue
             try:
                 if GENERATED_MARKER in safe_read(path, limit_bytes=4096):
                     continue
@@ -311,6 +313,10 @@ def safe_title(text: str, fallback: str = "untitled") -> str:
     return cleaned[:96] or fallback
 
 
+def is_singularity_mode(vault: Path) -> bool:
+    return mode_config(vault)["mode"] == "singularity"
+
+
 def route_path(vault: Path, note_type: str, title: str) -> str:
     mode = mode_config(vault)["mode"]
     slug = slugify(title)
@@ -329,6 +335,21 @@ def route_path(vault: Path, note_type: str, title: str) -> str:
             "research": f"wiki/resources/research/{slug}.md",
         }
         return mapping.get(note_type, f"wiki/resources/incoming/{slug}.md")
+    if mode == "singularity":
+        mapping = {
+            "source": f"raw/articles/engineering/ai-engineering/{slug}.md",
+            "entity": f"entities/engineering/ai-engineering/{slug}.md",
+            "concept": f"concepts/engineering/ai-engineering/{slug}.md",
+            "project": f"concepts/engineering/ai-engineering/{slug}.md",
+            "decision": f"queries/engineering/ai-engineering/{slug}.md",
+            "question": f"queries/engineering/ai-engineering/{slug}.md",
+            "session": f"source-summaries/engineering/ai-engineering/{slug}.md",
+            "source-summary": f"source-summaries/engineering/ai-engineering/{slug}.md",
+            "research": f"queries/engineering/ai-engineering/{slug}.md",
+            "comparison": f"comparisons/engineering/ai-engineering/{slug}.md",
+            "moc": f"mocs/engineering/ai-engineering/{slug}.md",
+        }
+        return mapping.get(note_type, f"raw/articles/engineering/ai-engineering/{slug}.md")
     if mode == "zettelkasten":
         zettel_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M%S%f")
         return f"wiki/{zettel_id}-{slug}.md"
@@ -349,6 +370,16 @@ def write_stub(vault: Path, note_type: str, title: str, source_rel: str, reason:
     path = vault / route_path(vault, note_type, title)
     if path.exists():
         return rel(vault, path)
+    source_entry = f"`{source_rel}`" if is_singularity_mode(vault) else f'"[[{Path(source_rel).stem}]]"'
+    source_link = f"`{source_rel}`" if is_singularity_mode(vault) else f"`[[{Path(source_rel).stem}]]`"
+    directory_hint = {
+        "entity": "entities/",
+        "concept": "concepts/",
+        "project": "concepts/",
+        "decision": "queries/",
+        "question": "queries/",
+        "research": "queries/",
+    }.get(note_type, "processed notes")
     body = textwrap.dedent(f"""\
     ---
     title: "{safe_title(title).replace('"', "'")}"
@@ -358,22 +389,23 @@ def write_stub(vault: Path, note_type: str, title: str, source_rel: str, reason:
     confidence: low
     ai-first: true
     sources:
-      - "[[{Path(source_rel).stem}]]"
+      - {source_entry}
     ---
 
     ## For future Claude
-    This is a low-confidence {note_type} stub created during deterministic Compound Vault ingest. Expand it after reading `[[{Path(source_rel).stem}]]` and replace guesses with sourced claims.
+    This is a low-confidence {note_type} stub created during deterministic Compound Vault ingest. Expand it after reading {source_link} and replace guesses with sourced claims.
 
     # {safe_title(title)}
 
     ## Notes
 
-    - Created from `[[{Path(source_rel).stem}]]`.
+    - Created from {source_link}.
+    - Target layer: `{directory_hint}`.
     - Reason: {reason}
 
     ## Sources
 
-    - `[[{Path(source_rel).stem}]]` (`{source_rel}`)
+    - {source_link}
     """)
     write_text(path, body)
     return rel(vault, path)
@@ -896,6 +928,22 @@ def analyze_note(vault: Path, path: Path) -> NoteInfo:
 
 def infer_note_type(vault: Path, path: Path) -> str:
     r = rel(vault, path)
+    if r.startswith("raw/articles/") or r.startswith("raw/papers/") or r.startswith("raw/transcripts/"):
+        return "source"
+    if r.startswith("source-summaries/"):
+        return "source-summary"
+    if r.startswith("concepts/"):
+        return "concept"
+    if r.startswith("comparisons/"):
+        return "comparison"
+    if r.startswith("entities/"):
+        return "entity"
+    if r.startswith("queries/"):
+        return "question"
+    if r.startswith("mocs/"):
+        return "moc"
+    if r.startswith("maintenance/"):
+        return "maintenance"
     if r.startswith("wiki/sources/"):
         return "source"
     if r.startswith("wiki/entities/"):
@@ -915,6 +963,70 @@ def infer_note_type(vault: Path, path: Path) -> str:
     return "note"
 
 
+def first_nonempty_lines(text: str, limit: int = 8) -> list[str]:
+    lines = []
+    for raw_line in strip_frontmatter(text).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("---"):
+            continue
+        if line.startswith("!") or line.startswith("```"):
+            continue
+        lines.append(line)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def write_source_summary(vault: Path, source_rel: str, title: str, source_text: str) -> str:
+    if not is_singularity_mode(vault):
+        return ""
+    path = vault / route_path(vault, "source-summary", title)
+    if path.exists():
+        return rel(vault, path)
+    excerpt_lines = first_nonempty_lines(source_text, limit=6)
+    excerpt = "\n".join(f"> {line[:320]}" for line in excerpt_lines) if excerpt_lines else "> No readable excerpt extracted yet."
+    body = textwrap.dedent(f"""\
+    ---
+    title: "{safe_title(title).replace('"', "'")}"
+    type: source-summary
+    date: {today()}
+    updated: {today()}
+    confidence: low
+    ai-first: true
+    sources:
+      - {source_rel}
+    ---
+
+    ## For future Claude
+    This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source.
+
+    # {safe_title(title)}
+
+    ## Source
+
+    - Raw source: `{source_rel}`
+
+    ## Initial Reading Scaffold
+
+    - What problem does this source address?
+    - What claims, definitions, methods, or entities should become durable pages?
+    - What should be linked into the relevant MOC or query page?
+
+    ## Extracted Opening
+
+    {excerpt}
+
+    ## Follow-up
+
+    - [ ] Confirm the title and source identity.
+    - [ ] Write a concise Chinese-first summary.
+    - [ ] Extract reusable concepts and entities.
+    - [ ] Add this source to the relevant query page and MOC.
+    """).rstrip() + "\n"
+    write_text(path, body)
+    return rel(vault, path)
+
+
 def ensure_scaffold(vault: Path) -> None:
     dirs = [
         "wiki", "wiki/sources", "wiki/entities", "wiki/concepts", "wiki/projects",
@@ -922,6 +1034,15 @@ def ensure_scaffold(vault: Path) -> None:
         "wiki/sessions", "wiki/resources", "wiki/resources/incoming",
         "wiki/resources/people", "wiki/resources/concepts", "wiki/resources/questions",
         "wiki/resources/research", ".vault-meta",
+        "raw/articles/engineering/ai-engineering", "raw/papers/engineering/ai-engineering",
+        "raw/assets", "raw/transcripts",
+        "source-summaries/engineering/ai-engineering",
+        "concepts/engineering/ai-engineering",
+        "comparisons/engineering/ai-engineering",
+        "entities/engineering/ai-engineering",
+        "queries/engineering/ai-engineering",
+        "mocs/engineering/ai-engineering",
+        "maintenance",
     ]
     for d in dirs:
         (vault / d).mkdir(parents=True, exist_ok=True)
@@ -961,7 +1082,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def build_index(vault: Path) -> list[NoteInfo]:
     ensure_scaffold(vault)
-    notes = [analyze_note(vault, p) for p in sorted(iter_markdown(vault), key=lambda x: rel(vault, x).lower())]
+    notes = [analyze_note(vault, p) for p in sorted(iter_markdown(vault, include_generated=False), key=lambda x: rel(vault, x).lower())]
     by_type: dict[str, list[NoteInfo]] = defaultdict(list)
     for n in notes:
         by_type[n.note_type].append(n)
@@ -1140,6 +1261,23 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     out = vault / routed
     title = extract_title(Path(base + ".md"), text) or base
     ingested_at = now().strftime(DATETIME_FMT)
+    if is_singularity_mode(vault):
+        checklist = [
+            "- [ ] Confirm this belongs under `raw/articles/` or move the original file to `raw/papers/` when it is a PDF.",
+            "- [ ] Complete the matching `source-summaries/` page.",
+            "- [ ] Extract entities into `entities/`.",
+            "- [ ] Extract concepts or comparisons into `concepts/` or `comparisons/`.",
+            "- [ ] Create or update a learning question in `queries/`.",
+            "- [ ] Update the relevant `mocs/` page.",
+            "- [ ] Flag contradictions or stale claims before applying proposals.",
+        ]
+    else:
+        checklist = [
+            "- [ ] Extract entities into `wiki/entities/`",
+            "- [ ] Extract concepts into `wiki/concepts/`",
+            "- [ ] Link related projects/decisions",
+            "- [ ] Flag contradictions or stale claims",
+        ]
     body = "\n".join([
         "---",
         f'title: "{title.replace(chr(34), chr(39))}"',
@@ -1166,10 +1304,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "",
         "## Future Claude extraction checklist",
         "",
-        "- [ ] Extract entities into `wiki/entities/`",
-        "- [ ] Extract concepts into `wiki/concepts/`",
-        "- [ ] Link related projects/decisions",
-        "- [ ] Flag contradictions or stale claims",
+        *checklist,
         "",
         "## Raw Content",
         "",
@@ -1177,6 +1312,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     ]).rstrip() + "\n"
     write_text(out, body)
     source_rel = rel(vault, out)
+    summary_rel = write_source_summary(vault, source_rel, title, text)
     distributed = distribute_ingest(vault, source_rel, text) if args.distribute else {"entities": [], "concepts": []}
     build_index(vault)
     build_chunk_index(vault)
@@ -1188,6 +1324,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "content_hash": digest,
         "ingested_at": now().strftime(DATETIME_FMT),
         "source_note": source_rel,
+        "source_summary": summary_rel,
         "distributed": distributed,
         "rewrite_plan": rewrite_plan,
         "analysis": analysis.get("paths", {}) if isinstance(analysis, dict) else {},
@@ -1199,8 +1336,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     claim_count = len(analysis.get("claims", [])) if isinstance(analysis, dict) else 0
     contradiction_count = len(analysis.get("contradictions", [])) if isinstance(analysis, dict) else 0
     proposal_count = len(analysis.get("patch_proposals", [])) if isinstance(analysis, dict) else 0
-    log_event(vault, "compound-ingest", f"{src} -> {source_rel}; entities={len(distributed['entities'])}; concepts={len(distributed['concepts'])}; claims={claim_count}; contradictions={contradiction_count}; proposals={proposal_count}; rewrite_plan={rewrite_plan or 'none'}")
+    log_event(vault, "compound-ingest", f"{src} -> {source_rel}; summary={summary_rel or 'none'}; entities={len(distributed['entities'])}; concepts={len(distributed['concepts'])}; claims={claim_count}; contradictions={contradiction_count}; proposals={proposal_count}; rewrite_plan={rewrite_plan or 'none'}")
     print(f"Ingested source into {out}")
+    if summary_rel:
+        print(f"Source summary: {vault / summary_rel}")
     if rewrite_plan:
         print(f"Rewrite plan: {vault / rewrite_plan}")
     if analysis:
@@ -1723,7 +1862,7 @@ def build_link_index(vault: Path) -> tuple[dict[str, Path], dict[str, set[str]],
     aliases: dict[str, Path] = {}
     outlinks: dict[str, set[str]] = defaultdict(set)
     inlinks: dict[str, set[str]] = defaultdict(set)
-    for p in iter_markdown(vault):
+    for p in iter_markdown(vault, include_generated=False):
         r = rel(vault, p)
         text = safe_read(p)
         aliases[Path(r).stem.lower()] = p
@@ -1731,6 +1870,11 @@ def build_link_index(vault: Path) -> tuple[dict[str, Path], dict[str, set[str]],
         fm = extract_frontmatter(text)
         if fm.get("title"):
             aliases[fm["title"].lower()] = p
+    for r in ("wiki/index.md", "wiki/hot.md", "wiki/log.md"):
+        p = vault / r
+        if p.exists():
+            aliases[Path(r).stem.lower()] = p
+            aliases[Path(r).with_suffix("").as_posix().lower()] = p
     for p in iter_markdown(vault, include_generated=False):
         r = rel(vault, p)
         text = safe_read(p)
@@ -1750,7 +1894,8 @@ def build_link_index(vault: Path) -> tuple[dict[str, Path], dict[str, set[str]],
 
 def health_report(vault: Path) -> dict[str, object]:
     ensure_scaffold(vault)
-    notes = [analyze_note(vault, p) for p in iter_markdown(vault)]
+    note_paths = list(iter_markdown(vault, include_generated=False))
+    notes = [analyze_note(vault, p) for p in note_paths]
     aliases, outlinks, inlinks = build_link_index(vault)
     dead_links = []
     for src, links in outlinks.items():
@@ -1767,7 +1912,7 @@ def health_report(vault: Path) -> dict[str, object]:
             orphan_pages.append(n.path)
     missing_frontmatter = []
     missing_ai_first = []
-    for p in iter_markdown(vault):
+    for p in note_paths:
         sample = safe_read(p, limit_bytes=4096)
         fm = extract_frontmatter(sample)
         if not FRONTMATTER_RE.match(sample):
@@ -1798,7 +1943,7 @@ def health_report(vault: Path) -> dict[str, object]:
             index_paths = {x["path"] for x in json.loads(index_json.read_text(encoding="utf-8"))}
         except Exception:
             index_paths = set()
-    actual_paths = {rel(vault, p) for p in iter_markdown(vault)}
+    actual_paths = {rel(vault, p) for p in note_paths}
     index_missing = sorted(actual_paths - index_paths) if index_paths else sorted(actual_paths)
     manifest = load_manifest(vault)
     manifest_missing = []
