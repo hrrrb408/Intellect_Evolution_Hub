@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-- 58 个命令，统一从 `commands/` 生成到不同 AI 工具适配层。
+- 59 个命令，统一从 `commands/` 生成到不同 AI 工具适配层。
 - 支持 Claude Code、Codex CLI、Gemini CLI、OpenCode、Hermes build 输出。
 - 支持 Codex Desktop / Claude Desktop 面向同一 vault 的 adapter 安装、检查与回滚。
 - 支持 IEH/SINGULARITY stage model：`raw/`、`source-summaries/`、`concepts/`、`entities/`、`queries/`、`mocs/`、`maintenance/`。
@@ -55,7 +55,7 @@
 
 ```text
 obsidian-second-brain/
-|-- commands/                  # 58 个平台中立命令定义
+|-- commands/                  # 59 个平台中立命令定义
 |-- references/                # vault schema、write policy、retrieval、desktop adapter 等规范
 |-- scripts/                   # 核心脚本、build、research、compound vault engine
 |-- scripts/research/          # research/x/youtube/podcast/notebooklm 工具
@@ -253,6 +253,40 @@ python3 scripts/compound_vault.py \
 
 - `/obsidian-apply-proposals`
 
+### Manifest repair
+
+正常 ingest 必须先走 manifest-aware 入口：
+
+```bash
+python3 scripts/compound_vault.py \
+  --vault /path/to/IEH \
+  ingest /path/to/source.pdf
+```
+
+如果某个 Desktop/agent 会话已经手工创建了 `raw/papers`、`raw/articles`
+和 `source-summaries`，但没有写入 `.vault-meta/compound-manifest.json`，
+用 manifest repair 修复机器账本。
+
+Dry-run：
+
+```bash
+python3 scripts/compound_vault.py \
+  --vault /path/to/IEH \
+  manifest-repair --json
+```
+
+Apply：
+
+```bash
+python3 scripts/compound_vault.py \
+  --vault /path/to/IEH \
+  manifest-repair --apply --json
+```
+
+对应 slash command：
+
+- `/obsidian-manifest-repair`
+
 ### Health
 
 ```bash
@@ -270,6 +304,7 @@ python3 scripts/compound_vault.py \
 - duplicate titles
 - generated index staleness
 - manifest source coverage
+- manifest untracked stage sources
 - PDF extraction issues
 
 对应 slash commands：
@@ -348,7 +383,7 @@ dist/hermes/
 
 `commands/` 是唯一命令源。不要手改 `dist/`。
 
-## 58 个命令
+## 59 个命令
 
 ### Vault
 
@@ -411,6 +446,7 @@ dist/hermes/
 - `/obsidian-compound-init`
 - `/obsidian-compound-health`
 - `/obsidian-compound-chunks`
+- `/obsidian-manifest-repair`
 - `/obsidian-apply-proposals`
 - `/obsidian-fusion`
 - `/obsidian-routes`
@@ -432,7 +468,8 @@ dist/hermes/
 7. 运行 `/obsidian-fusion` 生成 stage-model 草稿。
 8. 确认后运行 `/obsidian-fusion --apply`。
 9. 如已有旧 scaffold，再运行 `/obsidian-fusion --apply --upgrade-scaffolds`。
-10. 最后运行 `/obsidian-compound-health`。
+10. 如果某个 runtime 绕过了 `/obsidian-compound-ingest` 而手工写入 stage files，运行 `/obsidian-manifest-repair` dry-run，再按需 `--apply`。
+11. 最后运行 `/obsidian-compound-health`。
 
 ### 日常查询
 

@@ -22,7 +22,7 @@ automation, and large-scale source ingestion.
 - Repository remote: `https://github.com/hrrrb408/Intellect_Evolution_Hub.git`
 - Current README rewrite commit: `2ce8e27 Rewrite IEH project README`
 - Latest functional workflow commit before README: `c3835e9 Add reviewable fusion draft workflow`
-- Command count: 58 command files under `commands/`
+- Command count: 59 command files under `commands/`
 - Build outputs present:
   - `dist/claude-code/`
   - `dist/codex-cli/`
@@ -39,15 +39,15 @@ automation, and large-scale source ingestion.
   - PDF extraction issues: 0
 - Desktop install check: pass
 - Current IEH content scale:
-  - raw articles: 3
-  - raw papers: 0
-  - source summaries: 3
-  - concepts: 3
+  - raw articles: 6
+  - raw papers: 6 PDFs
+  - source summaries: 6
+  - concepts: 7
   - entities: 1
   - queries: 1
   - MOCs: 1
-  - manifest sources: 4
-  - chunk directories: 18
+  - manifest sources: 10
+  - BM25 chunks: 243
   - BM25 index: present
 
 ## Layer 1 - Code base
@@ -62,6 +62,8 @@ automation, and large-scale source ingestion.
 - Configurable SINGULARITY routes.
 - PDF extraction plus OCR fallback diagnostics.
 - Manifest/delta tracking for ingested sources.
+- Manifest repair for stage-model sources created outside the manifest-aware
+  ingest path.
 - Chunked BM25 retrieval.
 - Optional rerank path.
 - Source claim extraction.

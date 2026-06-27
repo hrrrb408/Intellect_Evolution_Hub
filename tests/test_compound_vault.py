@@ -322,6 +322,50 @@ def test_health_reports_pdf_extraction_issues():
         assert "PDF extraction issues: 1" in (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
 
 
+def test_manifest_repair_registers_stage_model_sources():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        paper = vault / "raw/papers/engineering/ai-engineering/example-paper.pdf"
+        article = vault / "raw/articles/engineering/ai-engineering/example-paper.md"
+        summary = vault / "source-summaries/engineering/ai-engineering/example-paper.md"
+        paper.parent.mkdir(parents=True, exist_ok=True)
+        article.parent.mkdir(parents=True, exist_ok=True)
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        paper.write_bytes(b"%PDF-1.4\nexample paper\n%%EOF\n")
+        article.write_text(
+            "---\ntitle: Example Paper\ntype: source\nai-first: true\n---\n\n"
+            "## For future Claude\nRaw extracted text.\n\n# Example Paper\n\nBody.\n",
+            encoding="utf-8",
+        )
+        summary.write_text(
+            "---\ntitle: Example Paper\ntype: source-summary\nai-first: true\nsources:\n"
+            "  - raw/papers/engineering/ai-engineering/example-paper.pdf\n"
+            "  - raw/articles/engineering/ai-engineering/example-paper.md\n---\n\n"
+            "## For future Claude\nSummary.\n\n# Example Paper\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "index")
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert len(health["manifest_untracked_stage_sources"]) == 1
+        assert health["manifest_untracked_stage_sources"][0]["source_format"] == "pdf"
+        dry = json.loads(run("--vault", str(vault), "manifest-repair", "--json").stdout)
+        assert dry["dry_run"] is True
+        assert dry["missing"] == 1
+        assert dry["repaired"] == 0
+        applied = json.loads(run("--vault", str(vault), "manifest-repair", "--apply", "--json").stdout)
+        assert applied["dry_run"] is False
+        assert applied["repaired"] == 1
+        manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+        item = manifest["sources"]["vault:raw/papers/engineering/ai-engineering/example-paper.pdf"]
+        assert item["source_note"] == "raw/articles/engineering/ai-engineering/example-paper.md"
+        assert item["source_summary"] == "source-summaries/engineering/ai-engineering/example-paper.md"
+        assert item["repair"]["method"] == "stage-source-scan"
+        health_after = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert health_after["manifest_untracked_stage_sources"] == []
+
+
 def test_source_summary_extracts_reading_card_sections():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
