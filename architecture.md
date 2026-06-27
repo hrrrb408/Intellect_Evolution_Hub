@@ -10,7 +10,7 @@ Last reviewed against commit `ff0319c` (2026-06-05).
 
 obsidian-second-brain is a cross-CLI **skill** (not a plugin, not a hosted service) that turns any Obsidian vault into an AI-first second brain. One platform-neutral command source compiles to four AI CLIs - Claude Code, Codex CLI, Gemini CLI, OpenCode - through a build-time adapter pattern. At runtime a slash command reads and writes the user's vault as plain markdown; commands shell out to Python helpers for anything deterministic (vault health, research fetches, codebase scans).
 
-- **45 commands**, grouped by `category:` frontmatter: vault 18, thinking 13, research 8, meta 6.
+- **56 commands**, grouped by `category:` frontmatter: vault 21, thinking 13, research 9, meta 13.
 - **40 commands are cross-platform.** The 4 Google Calendar commands (`/obsidian-agenda`, `/obsidian-calendar`, `/obsidian-meeting`, `/obsidian-schedule`) carry `exclude: [codex-cli, gemini-cli, opencode]` and ship Claude Code only, because they depend on the Google Calendar MCP.
 - A research toolkit that is key-less by default (free public sources) and uses Grok + Perplexity + Gemini when keys are present.
 - An opt-in background agent plus optional user-scheduled agents.
@@ -91,27 +91,27 @@ graph TD
 
 ## Command categories
 
-Commands are grouped by `category:` frontmatter, not by folder. Counts are at commit `ff0319c`. Commands marked `(Claude Code only)` are excluded from the Codex / Gemini / OpenCode builds.
+Commands are grouped by `category:` frontmatter, not by folder. Commands marked `(Claude Code only)` are excluded from the Codex / Gemini / OpenCode builds.
 
-### Vault (17)
+### Vault (21)
 Vault management: saving, organizing, searching, scheduling, maintaining.
 
-`/obsidian-save` `/obsidian-daily` `/obsidian-log` `/obsidian-task` `/obsidian-person` `/obsidian-capture` `/obsidian-find` `/obsidian-recap` `/obsidian-board` `/obsidian-project` `/obsidian-projects` `/obsidian-recurring` `/obsidian-world` `/obsidian-agenda` (Claude Code only) `/obsidian-calendar` (Claude Code only) `/obsidian-meeting` (Claude Code only) `/obsidian-schedule` (Claude Code only)
+`/obsidian-save` `/obsidian-daily` `/obsidian-log` `/obsidian-task` `/obsidian-person` `/obsidian-capture` `/obsidian-find` `/obsidian-recap` `/obsidian-board` `/obsidian-project` `/obsidian-projects` `/obsidian-recurring` `/obsidian-world` `/obsidian-hot` `/obsidian-query` `/obsidian-compound-save` `/obsidian-agenda` (Claude Code only) `/obsidian-calendar` (Claude Code only) `/obsidian-meeting` (Claude Code only) `/obsidian-schedule` (Claude Code only)
 
 ### Thinking (13)
 Use vault history to generate insight, challenge assumptions, surface patterns, and record decisions.
 
 `/obsidian-challenge` `/obsidian-emerge` `/obsidian-connect` `/obsidian-graduate` `/obsidian-decide` `/obsidian-adr` `/obsidian-reconcile` `/obsidian-review` `/obsidian-synthesize` `/obsidian-learn` `/obsidian-panel` `/idea-discovery` `/vault-deep-synthesis`
 
-### Research (8)
+### Research (9)
 AI-powered research and ingestion; findings save to the vault following the AI-first rule.
 
-`/research` `/research-deep` `/notebooklm` `/x-read` `/x-pulse` `/youtube` `/podcast` `/obsidian-ingest`
+`/research` `/research-deep` `/notebooklm` `/x-read` `/x-pulse` `/youtube` `/podcast` `/obsidian-ingest` `/obsidian-compound-ingest`
 
-### Meta (6)
+### Meta (12)
 Bootstrap, audit, export, visualize, document, and extend the system itself.
 
-`/obsidian-init` `/obsidian-health` `/obsidian-export` `/obsidian-visualize` `/obsidian-architect` `/create-command`
+`/obsidian-init` `/obsidian-health` `/obsidian-export` `/obsidian-visualize` `/obsidian-architect` `/obsidian-compound-init` `/obsidian-compound-health` `/obsidian-compound-chunks` `/obsidian-apply-proposals` `/obsidian-mode` `/obsidian-desktop-setup` `/obsidian-desktop-install` `/create-command`
 
 ---
 

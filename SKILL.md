@@ -106,7 +106,7 @@ See `references/vault-schema.md` for full structural details.
 ## Core Operating Principles
 
 ### AI-first vault rule (applies to every note)
-The vault is designed for **future-Claude** to read and reason over, not for human review. Every note Claude writes - across all 45 commands - must follow `references/ai-first-rules.md`:
+The vault is designed for **future-Claude** to read and reason over, not for human review. Every note Claude writes - across all 56 commands - must follow `references/ai-first-rules.md`:
 
 1. **Self-contained context** - each note explains itself; don't rely on backlinks alone
 2. **"For future Claude" preamble** - 2-3 sentence summary so Claude can decide relevance in 10 seconds
@@ -615,6 +615,52 @@ Steps:
 6. For safe fixes (missing frontmatter, obvious duplicates, creating pages for concept gaps), offer to fix them automatically
 7. For destructive fixes (archiving, merging, resolving contradictions), list them and ask for explicit confirmation before touching anything
 8. Append to `log.md` with severity counts
+
+---
+
+### Compound Vault commands
+
+These commands add the claude-obsidian-style hot/index/log and retrieval layer
+without replacing the original obsidian-second-brain workflows.
+
+- `/obsidian-compound-init` creates the `wiki/` scaffold, `wiki/hot.md`, `wiki/index.md`, `wiki/log.md`, and generated metadata.
+- `/obsidian-hot` refreshes the small recent-context cache.
+- `/obsidian-query` answers from `wiki/hot.md`, `wiki/index.md`, and BM25-style local retrieval candidates.
+- `/obsidian-compound-ingest` preserves a file or URL as a source note, extracts reviewable claims, detects contradiction candidates, generates patch proposals, refreshes context, and then prompts durable entity/concept/project/decision rewrites.
+- `/obsidian-compound-health` reports dead wikilinks, orphan pages, missing frontmatter, stale generated files, and index gaps.
+- `/obsidian-compound-save` appends a concise memory/update to `wiki/log.md`, refreshes `wiki/hot.md`, and then patches durable notes when needed.
+- `/obsidian-compound-chunks` rebuilds `.vault-meta/chunks/` and `.vault-meta/bm25/index.json` for chunk-level retrieval.
+- `/obsidian-apply-proposals` dry-runs or safely applies generated `append_evidence` and `append_timeline` proposals; contradiction reviews stay manual.
+- `/obsidian-mode` gets, sets, or previews methodology routing for generic, LYT, PARA, and Zettelkasten.
+
+Implementation lives in `scripts/compound_vault.py`. The same command source is
+compiled through the adapters into Claude Code slash commands, Codex native
+skills, Gemini command files, OpenCode command files, and Hermes skills.
+
+---
+
+### `/obsidian-desktop-setup`
+
+**Prepares the shared vault protocol for Codex Desktop and Claude Desktop.**
+
+Steps:
+1. Read `references/desktop-adapters.md`
+2. For Codex Desktop, build the Codex platform output and copy it into the vault root
+3. For Claude Desktop, configure MCP or project instructions instead of trying to install Claude Code slash commands
+4. Run `/obsidian-compound-init` once so Desktop clients have `wiki/hot.md`, `wiki/index.md`, and `wiki/log.md`
+5. Verify Desktop clients use the same AI-first rules, retrieval order, and write policy
+
+---
+
+### `/obsidian-desktop-install`
+
+**Installs Desktop-facing adapter files into a target vault.**
+
+Runs `scripts/install_desktop.py`, which builds the Codex adapter output and
+copies `AGENTS.md`, `.agents/skills/`, `.codex/scripts/`, and `.codex/references/`
+into the vault. It also writes `DESKTOP-ADAPTERS.md` for Claude Desktop handoff.
+It does not mutate Claude Desktop application settings; configure MCP or project
+instructions separately.
 
 ---
 
