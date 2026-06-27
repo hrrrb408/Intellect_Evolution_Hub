@@ -233,6 +233,68 @@ def test_singularity_route_rules_are_configurable():
         assert "Signal terms:" in summaries[0].read_text(encoding="utf-8")
 
 
+def test_routes_command_and_fusion_apply_create_stage_scaffolds():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        source = vault / "attention.md"
+        source.write_text(
+            "# Attention Mechanisms\n\nAttention Mechanisms connect brain cortex attention, neuroscience, and cognitive control.\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        route_test = json.loads(run("--vault", str(vault), "routes", "test", "Attention Mechanisms", "--text", "transformer neural retrieval").stdout)
+        assert route_test["domain"] == "engineering"
+        assert route_test["subdomain"] == "ai-engineering"
+        added = json.loads(run("--vault", str(vault), "routes", "add", "science", "neuroscience", "brain,cortex,attention").stdout)
+        assert added["domain"] == "science"
+        assert "attention" in added["keywords"]
+
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+        raw_notes = list((vault / "raw/articles/science/neuroscience").glob("*.md"))
+        assert raw_notes
+        dry = json.loads(run("--vault", str(vault), "fusion", raw_notes[0].relative_to(vault).as_posix()).stdout)
+        assert dry["dry_run"] is True
+        assert any(item["action"] == "ensure_moc" for item in dry["proposals"])
+        applied = json.loads(run("--vault", str(vault), "fusion", raw_notes[0].relative_to(vault).as_posix(), "--apply").stdout)
+        assert applied["dry_run"] is False
+        assert applied["created"] >= 1
+        assert (vault / "mocs/science/neuroscience/index.md").exists()
+        assert list((vault / "queries/science/neuroscience").glob("*.md"))
+        assert (vault / "wiki/meta/fusion-proposals-latest.md").exists()
+
+
+def test_health_reports_pdf_extraction_issues():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        source_note = vault / "raw/articles/engineering/ai-engineering/scanned.md"
+        source_note.parent.mkdir(parents=True, exist_ok=True)
+        source_note.write_text(
+            "---\ntitle: Scanned PDF\ntype: source\nai-first: true\n---\n\n# Scanned PDF\n\nNo usable text.\n",
+            encoding="utf-8",
+        )
+        manifest = {
+            "schema_version": 1,
+            "sources": {
+                "file:/tmp/scanned.pdf": {
+                    "source_note": "raw/articles/engineering/ai-engineering/scanned.md",
+                    "source_format": "pdf",
+                    "pdf_extraction": {
+                        "status": "ocr-required",
+                        "stderr": "Missing OCR tools: tesseract",
+                    },
+                }
+            },
+        }
+        (vault / ".vault-meta").mkdir(exist_ok=True)
+        (vault / ".vault-meta/compound-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert health["pdf_extraction_issues"]
+        assert health["pdf_extraction_issues"][0]["status"] == "ocr-required"
+        assert "PDF extraction issues: 1" in (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)

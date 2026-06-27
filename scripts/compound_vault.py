@@ -2214,10 +2214,21 @@ def health_report(vault: Path) -> dict[str, object]:
     index_missing = sorted(actual_paths - index_paths) if index_paths else sorted(actual_paths)
     manifest = load_manifest(vault)
     manifest_missing = []
+    pdf_extraction_issues = []
     for source_key, item in manifest.get("sources", {}).items():
         source_note = item.get("source_note") if isinstance(item, dict) else None
         if source_note and not (vault / source_note).exists():
             manifest_missing.append({"source": source_key, "source_note": source_note})
+        if isinstance(item, dict) and item.get("source_format") == "pdf":
+            extraction = item.get("pdf_extraction", {})
+            status = extraction.get("status") if isinstance(extraction, dict) else None
+            if status in {"ocr-required", "ocr-empty", "ocr-render-failed", "pdftotext-failed", "pdftotext-unavailable", "empty"}:
+                pdf_extraction_issues.append({
+                    "source": source_key,
+                    "source_note": source_note,
+                    "status": status,
+                    "diagnostics": str(extraction.get("stderr", ""))[:500] if isinstance(extraction, dict) else "",
+                })
     return {
         "generated_at": now().strftime(DATETIME_FMT),
         "note_count": len(notes),
@@ -2229,6 +2240,7 @@ def health_report(vault: Path) -> dict[str, object]:
         "generated_staleness_hours": generated_staleness,
         "index_missing_paths": index_missing,
         "manifest_missing_sources": manifest_missing,
+        "pdf_extraction_issues": pdf_extraction_issues,
     }
 
 
@@ -2242,6 +2254,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     index_missing = report["index_missing_paths"]
     duplicate_titles = report["duplicate_titles"]
     manifest_missing = report["manifest_missing_sources"]
+    pdf_extraction_issues = report.get("pdf_extraction_issues", [])
     lines = [
         "---",
         f"title: Vault Health Report {date}",
@@ -2268,6 +2281,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         f"- Duplicate titles: {len(duplicate_titles)}",
         f"- Index missing paths: {len(index_missing)}",
         f"- Manifest missing sources: {len(manifest_missing)}",
+        f"- PDF extraction issues: {len(pdf_extraction_issues)}",
         f"- Generated staleness hours: `{json.dumps(report['generated_staleness_hours'], ensure_ascii=False)}`",
         "",
         "## Dead Links",
@@ -2296,6 +2310,12 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     if manifest_missing:
         for item in manifest_missing[:100]:
             lines.append(f"- `{item['source']}` -> `{item['source_note']}`")
+    else:
+        lines.append("None.")
+    lines += ["", "## PDF Extraction Issues", ""]
+    if pdf_extraction_issues:
+        for item in pdf_extraction_issues[:100]:
+            lines.append(f"- `{item['source_note']}` status=`{item['status']}` diagnostics=`{item['diagnostics']}`")
     else:
         lines.append("None.")
     text = "\n".join(lines).rstrip() + "\n"
@@ -2337,6 +2357,396 @@ def cmd_chunks(args: argparse.Namespace) -> int:
     else:
         print(f"Chunk index written: {meta_dir(vault) / 'bm25/index.json'}")
         print(f"Chunks: {index.get('chunk_count', 0)}")
+    return 0
+
+
+def latest_manifest_source(vault: Path) -> str:
+    manifest = load_manifest(vault)
+    sources = manifest.get("sources", {})
+    if not isinstance(sources, dict):
+        return ""
+    latest_rel = ""
+    latest_time = ""
+    for item in sources.values():
+        if not isinstance(item, dict):
+            continue
+        ingested = str(item.get("ingested_at") or "")
+        source_note = str(item.get("source_note") or "")
+        if source_note and ingested >= latest_time:
+            latest_rel = source_note
+            latest_time = ingested
+    return latest_rel
+
+
+def existing_note_by_stem(vault: Path, roots: Sequence[str], stem: str) -> str:
+    needle = slugify(stem)
+    for root in roots:
+        base = vault / root
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.md")):
+            if slugify(path.stem) == needle:
+                return rel(vault, path)
+    return ""
+
+
+def stage_path(kind: str, domain: str, subdomain: str, title: str) -> str:
+    slug = slugify(title)
+    mapping = {
+        "concept": f"concepts/{domain}/{subdomain}/{slug}.md",
+        "entity": f"entities/{domain}/{subdomain}/{slug}.md",
+        "query": f"queries/{domain}/{subdomain}/{slug}.md",
+        "moc": f"mocs/{domain}/{subdomain}/index.md",
+        "source-summary": f"source-summaries/{domain}/{subdomain}/{slug}.md",
+    }
+    return mapping[kind]
+
+
+def infer_source_context(vault: Path, source_rel: str) -> dict[str, object]:
+    source_path = vault / source_rel
+    text = safe_read(source_path)
+    fm = extract_frontmatter(text)
+    title = fm.get("title") or extract_title(source_path, text)
+    route_rules, route_default = load_route_rules(vault)
+    domain = fm.get("domain")
+    subdomain = fm.get("subdomain")
+    if not domain or not subdomain:
+        domain, subdomain = infer_domain_subdomain(title, text, source_rel, rules=route_rules, default=route_default)
+    domain = slugify(str(domain))
+    subdomain = slugify(str(subdomain))
+    return {
+        "source_rel": source_rel,
+        "source_path": source_path,
+        "text": text,
+        "title": title,
+        "domain": domain,
+        "subdomain": subdomain,
+        "terms": top_signal_terms(text, limit=10),
+    }
+
+
+def build_fusion_proposals(vault: Path, source_rel: str) -> dict[str, object]:
+    context = infer_source_context(vault, source_rel)
+    title = str(context["title"])
+    domain = str(context["domain"])
+    subdomain = str(context["subdomain"])
+    text = str(context["text"])
+    entities, concepts = extract_ingest_candidates(text)
+    concept_names: list[str] = []
+    seen_concepts: set[str] = set()
+    for item in concepts + [title]:
+        cleaned = safe_title(item)
+        key = slugify(cleaned)
+        if cleaned and key not in seen_concepts:
+            concept_names.append(cleaned)
+            seen_concepts.add(key)
+        if len(concept_names) >= 5:
+            break
+    entity_names: list[str] = []
+    seen_entities: set[str] = set()
+    for item in entities:
+        cleaned = safe_title(item)
+        key = slugify(cleaned)
+        if cleaned and key not in seen_entities:
+            entity_names.append(cleaned)
+            seen_entities.add(key)
+        if len(entity_names) >= 5:
+            break
+    summary_path = stage_path("source-summary", domain, subdomain, title)
+    query_title = f"How Should I Study {title}"
+    query_path = stage_path("query", domain, subdomain, query_title)
+    moc_path = stage_path("moc", domain, subdomain, "index")
+    proposals: list[dict[str, object]] = []
+    proposals.append({
+        "proposal_id": f"fusion-{file_hash(source_rel + summary_path)}",
+        "action": "ensure_source_summary",
+        "target_path": summary_path,
+        "status": "exists" if (vault / summary_path).exists() else "missing",
+        "rationale": "Every raw source should have one single-source reading scaffold.",
+    })
+    for name in concept_names:
+        existing = existing_note_by_stem(vault, [f"concepts/{domain}/{subdomain}", "concepts"], name)
+        target = existing or stage_path("concept", domain, subdomain, name)
+        proposals.append({
+            "proposal_id": f"fusion-{file_hash(source_rel + target)}",
+            "action": "ensure_concept",
+            "target_path": target,
+            "title": name,
+            "status": "exists" if existing or (vault / target).exists() else "missing",
+            "rationale": "Candidate reusable concept from source headings or title.",
+        })
+    for name in entity_names:
+        existing = existing_note_by_stem(vault, [f"entities/{domain}/{subdomain}", "entities"], name)
+        target = existing or stage_path("entity", domain, subdomain, name)
+        proposals.append({
+            "proposal_id": f"fusion-{file_hash(source_rel + target)}",
+            "action": "ensure_entity",
+            "target_path": target,
+            "title": name,
+            "status": "exists" if existing or (vault / target).exists() else "missing",
+            "rationale": "Candidate durable entity from source proper nouns.",
+        })
+    proposals.append({
+        "proposal_id": f"fusion-{file_hash(source_rel + query_path)}",
+        "action": "ensure_query",
+        "target_path": query_path,
+        "title": query_title,
+        "status": "exists" if (vault / query_path).exists() else "missing",
+        "rationale": "Learning-first vaults need a query page when a source creates a study direction.",
+    })
+    proposals.append({
+        "proposal_id": f"fusion-{file_hash(source_rel + moc_path)}",
+        "action": "ensure_moc",
+        "target_path": moc_path,
+        "title": f"{domain}/{subdomain} MOC",
+        "status": "exists" if (vault / moc_path).exists() else "missing",
+        "rationale": "Durable processed pages should be reachable from a subdomain MOC.",
+    })
+    return {
+        "generated_at": now().strftime(DATETIME_FMT),
+        "source": source_rel,
+        "title": title,
+        "domain": domain,
+        "subdomain": subdomain,
+        "signal_terms": context["terms"],
+        "proposals": proposals,
+    }
+
+
+def source_yaml_lines(source_rel: str) -> list[str]:
+    return ["sources:", f"  - {source_rel}"]
+
+
+def create_fusion_page(vault: Path, proposal: dict[str, object], source_rel: str, domain: str, subdomain: str) -> bool:
+    target = vault / str(proposal["target_path"])
+    if target.exists():
+        return False
+    action = str(proposal["action"])
+    title = safe_title(str(proposal.get("title") or Path(str(proposal["target_path"])).stem))
+    if action == "ensure_concept":
+        body = [
+            "---",
+            f"title: \"{title.replace(chr(34), chr(39))}\"",
+            "type: concept",
+            f"date: {today()}",
+            f"updated: {today()}",
+            f"domain: {domain}",
+            f"subdomain: {subdomain}",
+            "confidence: low",
+            "ai-first: true",
+            *source_yaml_lines(source_rel),
+            "---",
+            "",
+            "## For future Claude",
+            "This concept page was created by the Compound Vault fusion workflow. Replace this scaffold with a concise Chinese-first explanation after reading the source.",
+            "",
+            f"# {title}",
+            "",
+            "## Working Definition",
+            "",
+            "- TODO: explain the concept in the user's words.",
+            "",
+            "## Evidence",
+            "",
+            f"- Initial source: {path_to_wikilink(source_rel)}",
+        ]
+    elif action == "ensure_entity":
+        body = [
+            "---",
+            f"title: \"{title.replace(chr(34), chr(39))}\"",
+            "type: entity",
+            f"date: {today()}",
+            f"updated: {today()}",
+            f"domain: {domain}",
+            f"subdomain: {subdomain}",
+            "confidence: low",
+            "ai-first: true",
+            *source_yaml_lines(source_rel),
+            "---",
+            "",
+            "## For future Claude",
+            "This entity page was created by the Compound Vault fusion workflow. Confirm identity and role before relying on it.",
+            "",
+            f"# {title}",
+            "",
+            "## Role",
+            "",
+            "- TODO: identify why this entity matters.",
+            "",
+            "## Sources",
+            "",
+            f"- {path_to_wikilink(source_rel)}",
+        ]
+    elif action == "ensure_query":
+        body = [
+            "---",
+            f"title: \"{title.replace(chr(34), chr(39))}\"",
+            "type: question",
+            f"date: {today()}",
+            f"updated: {today()}",
+            f"domain: {domain}",
+            f"subdomain: {subdomain}",
+            "confidence: low",
+            "ai-first: true",
+            *source_yaml_lines(source_rel),
+            "---",
+            "",
+            "## For future Claude",
+            "This query page was created by the Compound Vault fusion workflow. Turn it into a learning guide with judgment, order, confusions, and self-checks.",
+            "",
+            f"# {title}",
+            "",
+            "## Short Answer",
+            "",
+            "- TODO: write the current learning judgment.",
+            "",
+            "## Learning Order",
+            "",
+            f"1. Read {path_to_wikilink(source_rel)}.",
+            "2. Extract concepts and compare them with existing pages.",
+            "3. Update the MOC after the durable pages are stable.",
+            "",
+            "## Self-Check",
+            "",
+            "- What problem does this source solve?",
+            "- Which concepts are reusable outside this source?",
+            "- What should I read next?",
+        ]
+    elif action == "ensure_moc":
+        body = [
+            "---",
+            f"title: \"{title.replace(chr(34), chr(39))}\"",
+            "type: moc",
+            f"date: {today()}",
+            f"updated: {today()}",
+            f"domain: {domain}",
+            f"subdomain: {subdomain}",
+            "confidence: low",
+            "ai-first: true",
+            "sources: []",
+            "---",
+            "",
+            "## For future Claude",
+            "This MOC was created by the Compound Vault fusion workflow. Keep it navigational; do not duplicate full notes here.",
+            "",
+            f"# {title}",
+            "",
+            "## Current Questions",
+            "",
+            "## Concepts",
+            "",
+            "## Entities",
+            "",
+            "## Source Summaries",
+            "",
+        ]
+    else:
+        return False
+    write_text(target, "\n".join(body).rstrip() + "\n")
+    return True
+
+
+def append_moc_links(vault: Path, moc_rel: str, proposals: list[dict[str, object]]) -> int:
+    moc = vault / moc_rel
+    if not moc.exists():
+        return 0
+    text = safe_read(moc)
+    added = 0
+    for proposal in proposals:
+        action = str(proposal.get("action") or "")
+        target = str(proposal.get("target_path") or "")
+        if action not in {"ensure_concept", "ensure_entity", "ensure_query", "ensure_source_summary"}:
+            continue
+        link = f"- {path_to_wikilink(target)}"
+        if link in text:
+            continue
+        heading = {
+            "ensure_concept": "Concepts",
+            "ensure_entity": "Entities",
+            "ensure_query": "Current Questions",
+            "ensure_source_summary": "Source Summaries",
+        }[action]
+        text = append_under_heading(text, heading, link)
+        added += 1
+    if added:
+        write_text(moc, text)
+    return added
+
+
+def write_fusion_report(vault: Path, report: dict[str, object]) -> None:
+    json_path = vault / "wiki/meta/fusion-proposals-latest.json"
+    md_path = vault / "wiki/meta/fusion-proposals-latest.md"
+    save_json(json_path, report)
+    lines = [
+        "---",
+        "title: Latest Fusion Proposals",
+        "type: fusion-proposals",
+        f"created: {now().strftime(DATETIME_FMT)}",
+        "ai-first: true",
+        "---",
+        "",
+        "## For future Claude",
+        "This generated report proposes stage-model fusion after source ingest: source-summary, concepts, entities, query, and MOC coverage.",
+        "",
+        "# Latest Fusion Proposals",
+        "",
+        GENERATED_MARKER,
+        "",
+        "## Source",
+        "",
+        f"- Source: `{report['source']}`",
+        f"- Domain: `{report['domain']}`",
+        f"- Subdomain: `{report['subdomain']}`",
+        f"- Signal terms: {', '.join(report.get('signal_terms', []))}",
+        "",
+        "## Proposals",
+        "",
+    ]
+    for proposal in report["proposals"]:
+        lines += [
+            f"### {proposal['proposal_id']}",
+            "",
+            f"- Action: `{proposal['action']}`",
+            f"- Target: `{proposal['target_path']}`",
+            f"- Status: `{proposal['status']}`",
+            f"- Rationale: {proposal['rationale']}",
+            "",
+        ]
+    write_text(md_path, "\n".join(lines).rstrip() + "\n")
+
+
+def cmd_fusion(args: argparse.Namespace) -> int:
+    vault = resolve_vault(args.vault)
+    ensure_scaffold(vault)
+    source_rel = args.source or latest_manifest_source(vault)
+    if not source_rel:
+        print("No source provided and manifest has no source_note.", file=sys.stderr)
+        return 2
+    source_rel = rel(vault, (vault / source_rel).resolve()) if not Path(source_rel).is_absolute() else rel(vault, Path(source_rel))
+    source_path = vault / source_rel
+    if not source_path.exists():
+        print(f"Source note not found: {source_rel}", file=sys.stderr)
+        return 2
+    report = build_fusion_proposals(vault, source_rel)
+    created = 0
+    moc_links = 0
+    if args.apply:
+        for proposal in report["proposals"]:
+            if create_fusion_page(vault, proposal, source_rel, str(report["domain"]), str(report["subdomain"])):
+                proposal["status"] = "created"
+                created += 1
+        moc_rel = stage_path("moc", str(report["domain"]), str(report["subdomain"]), "index")
+        moc_links = append_moc_links(vault, moc_rel, report["proposals"])
+        if created or moc_links:
+            build_index(vault)
+            build_chunk_index(vault)
+            update_hot(vault)
+    report["dry_run"] = not args.apply
+    report["created"] = created
+    report["moc_links_added"] = moc_links
+    write_fusion_report(vault, report)
+    log_event(vault, "compound-fusion", f"source={source_rel}; dry_run={not args.apply}; created={created}; moc_links={moc_links}")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -2488,6 +2898,45 @@ def cmd_mode(args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_routes(args: argparse.Namespace) -> int:
+    vault = resolve_vault(args.vault)
+    ensure_scaffold(vault)
+    routes_path = route_rules_path(vault)
+    payload = load_json(routes_path, default_route_rules_payload())
+    if args.routes_cmd == "list":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.routes_cmd == "test":
+        rules, default = load_route_rules(vault)
+        domain, subdomain = infer_domain_subdomain(args.title, args.text or "", args.source or "", rules=rules, default=default)
+        result = {
+            "title": args.title,
+            "domain": domain,
+            "subdomain": subdomain,
+            "route": route_path(vault, args.type, args.title, domain=domain, subdomain=subdomain),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.routes_cmd == "add":
+        if not isinstance(payload, dict):
+            payload = default_route_rules_payload()
+        rules = payload.get("rules")
+        if not isinstance(rules, list):
+            rules = []
+            payload["rules"] = rules
+        rule = {
+            "domain": slugify(args.domain),
+            "subdomain": slugify(args.subdomain),
+            "keywords": [x.strip().lower() for x in args.keywords.split(",") if x.strip()],
+        }
+        rules.append(rule)
+        save_json(routes_path, payload)
+        log_event(vault, "compound-routes", f"add {rule['domain']}/{rule['subdomain']}")
+        print(json.dumps(rule, ensure_ascii=False, indent=2))
+        return 0
+    return 2
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     vault = resolve_vault(args.vault)
     log_event(vault, args.event, args.details or "")
@@ -2549,6 +2998,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_chunks)
 
+    sp = sub.add_parser("fusion", help="Plan or apply stage-model source fusion")
+    sp.add_argument("source", nargs="?", help="Source note path. Defaults to latest manifest source.")
+    sp.add_argument("--apply", action="store_true", help="Create missing concept/entity/query/MOC scaffolds and update MOC links")
+    sp.set_defaults(func=cmd_fusion)
+
     sp = sub.add_parser("apply-proposals", help="Dry-run or apply safe patch proposals")
     sp.add_argument("--proposal-file", help="Defaults to wiki/meta/patch-proposals-latest.json")
     sp.add_argument("--apply", action="store_true", help="Actually write append_evidence and append_timeline proposals")
@@ -2563,6 +3017,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp_mode_route.add_argument("type", choices=sorted(VALID_ROUTE_TYPES))
     sp_mode_route.add_argument("name")
     sp.set_defaults(func=cmd_mode)
+
+    sp = sub.add_parser("routes", help="List, test, or add singularity routing rules")
+    routes_sub = sp.add_subparsers(dest="routes_cmd", required=True)
+    routes_sub.add_parser("list")
+    sp_routes_test = routes_sub.add_parser("test")
+    sp_routes_test.add_argument("title")
+    sp_routes_test.add_argument("--text", default="")
+    sp_routes_test.add_argument("--source", default="")
+    sp_routes_test.add_argument("--type", choices=sorted(VALID_ROUTE_TYPES), default="source")
+    sp_routes_add = routes_sub.add_parser("add")
+    sp_routes_add.add_argument("domain")
+    sp_routes_add.add_argument("subdomain")
+    sp_routes_add.add_argument("keywords", help="Comma-separated keyword list")
+    sp.set_defaults(func=cmd_routes)
 
     sp = sub.add_parser("log", help="Append to wiki/log.md")
     sp.add_argument("event")
