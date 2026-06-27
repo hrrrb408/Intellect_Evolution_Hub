@@ -2,7 +2,7 @@
 description: Install built desktop-facing adapter files into a target Obsidian vault for Codex Desktop and Claude Desktop handoff.
 category: meta
 triggers_en: ["install desktop adapter", "install codex desktop", "prepare claude desktop", "desktop install"]
-argument-hint: "<vault path> [--no-build]"
+argument-hint: "<vault path> [--no-build] [--check] [--rollback] [--json]"
 allowed-tools: Bash, Read
 ---
 
@@ -10,6 +10,12 @@ allowed-tools: Bash, Read
 
 Install the shared Desktop-facing vault files. This is more concrete than
 `/obsidian-desktop-setup`: it runs the installer script against a target vault.
+
+It also supports:
+
+- `--check` to verify an existing Desktop install.
+- `--rollback` to remove files recorded in `.vault-meta/desktop-install-manifest.json`.
+- `--json` for machine-readable diagnostics.
 
 ## Procedure
 
@@ -40,6 +46,7 @@ Then verify the target vault contains:
 - `.codex/scripts/compound_vault.py`
 - `.codex/references/desktop-adapters.md`
 - `DESKTOP-ADAPTERS.md`
+- `.vault-meta/desktop-install-manifest.json`
 
 Claude Desktop still needs MCP or project instructions pointing at the vault.
 The installer does not mutate Claude Desktop app settings.
