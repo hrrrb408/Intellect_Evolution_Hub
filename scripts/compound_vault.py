@@ -24,7 +24,9 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 import urllib.error
@@ -321,28 +323,77 @@ def is_singularity_mode(vault: Path) -> bool:
     return mode_config(vault)["mode"] == "singularity"
 
 
-DOMAIN_RULES: list[tuple[str, str, tuple[str, ...]]] = [
-    ("engineering", "ai-engineering", (
+DEFAULT_DOMAIN_RULES: list[dict[str, object]] = [
+    {"domain": "engineering", "subdomain": "ai-engineering", "keywords": (
         "clip", "llm", "language model", "foundation model", "test-time adaptation",
         "distribution shift", "vision", "neural", "transformer", "machine learning",
         "deep learning", "retrieval", "embedding", "rag", "agent", "ai ",
-    )),
-    ("engineering", "python", ("python", "fastapi", "pydantic", "django", "flask")),
-    ("engineering", "java", ("java", "spring", "spring boot", "jvm", "maven")),
-    ("engineering", "computer-network", ("tcp", "ip", "network", "http", "dns", "routing")),
-    ("finance", "markets", ("finance", "market", "asset", "portfolio", "trading", "volatility", "stock")),
-    ("medicine", "psychiatry", ("adhd", "psychiatry", "depression", "clinical", "diagnosis")),
-    ("medicine", "public-health", ("public health", "epidemiology", "hospital", "patient")),
-    ("science", "cognitive-science", ("cognitive", "attention", "memory", "perception")),
-    ("business", "strategy", ("strategy", "market positioning", "customer", "revenue", "product-market")),
-    ("life", "career", ("career", "interview", "resume", "导师", "advisor")),
+    )},
+    {"domain": "engineering", "subdomain": "python", "keywords": ("python", "fastapi", "pydantic", "django", "flask")},
+    {"domain": "engineering", "subdomain": "java", "keywords": ("java", "spring", "spring boot", "jvm", "maven")},
+    {"domain": "engineering", "subdomain": "computer-network", "keywords": ("tcp", "ip", "network", "http", "dns", "routing")},
+    {"domain": "finance", "subdomain": "markets", "keywords": ("finance", "market", "asset", "portfolio", "trading", "volatility", "stock")},
+    {"domain": "medicine", "subdomain": "psychiatry", "keywords": ("adhd", "psychiatry", "depression", "clinical", "diagnosis")},
+    {"domain": "medicine", "subdomain": "public-health", "keywords": ("public health", "epidemiology", "hospital", "patient")},
+    {"domain": "science", "subdomain": "cognitive-science", "keywords": ("cognitive", "attention", "memory", "perception")},
+    {"domain": "society", "subdomain": "history", "keywords": ("history", "culture", "civilization", "中国文化", "文化史")},
+    {"domain": "business", "subdomain": "strategy", "keywords": ("strategy", "market positioning", "customer", "revenue", "product-market")},
+    {"domain": "life", "subdomain": "career", "keywords": ("career", "interview", "resume", "导师", "advisor")},
 ]
 
 
-def infer_domain_subdomain(title: str, text: str = "", source: str = "") -> tuple[str, str]:
+def route_rules_path(vault: Path) -> Path:
+    return meta_dir(vault) / "singularity-routes.json"
+
+
+def default_route_rules_payload() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "default": {"domain": "engineering", "subdomain": "ai-engineering"},
+        "rules": [
+            {
+                "domain": str(item["domain"]),
+                "subdomain": str(item["subdomain"]),
+                "keywords": list(item["keywords"]),
+            }
+            for item in DEFAULT_DOMAIN_RULES
+        ],
+    }
+
+
+def load_route_rules(vault: Path) -> tuple[list[dict[str, object]], tuple[str, str]]:
+    payload = load_json(route_rules_path(vault), default_route_rules_payload())
+    if not isinstance(payload, dict):
+        payload = default_route_rules_payload()
+    default = payload.get("default") if isinstance(payload.get("default"), dict) else {}
+    default_domain = slugify(str(default.get("domain", "engineering")))
+    default_subdomain = slugify(str(default.get("subdomain", "ai-engineering")))
+    raw_rules = payload.get("rules")
+    rules = raw_rules if isinstance(raw_rules, list) else default_route_rules_payload()["rules"]
+    normalized = []
+    for item in rules:
+        if not isinstance(item, dict):
+            continue
+        domain = slugify(str(item.get("domain", "")))
+        subdomain = slugify(str(item.get("subdomain", "")))
+        keywords = item.get("keywords", [])
+        if not domain or not subdomain or not isinstance(keywords, list):
+            continue
+        normalized.append({
+            "domain": domain,
+            "subdomain": subdomain,
+            "keywords": [str(keyword).lower() for keyword in keywords if str(keyword).strip()],
+        })
+    return normalized, (default_domain, default_subdomain)
+
+
+def infer_domain_subdomain(title: str, text: str = "", source: str = "", rules: list[dict[str, object]] | None = None, default: tuple[str, str] = ("engineering", "ai-engineering")) -> tuple[str, str]:
     haystack = f"{title}\n{source}\n{text[:8000]}".lower()
-    best: tuple[int, str, str] = (0, "engineering", "ai-engineering")
-    for domain, subdomain, keywords in DOMAIN_RULES:
+    best: tuple[int, str, str] = (0, default[0], default[1])
+    for item in rules or DEFAULT_DOMAIN_RULES:
+        domain = str(item["domain"])
+        subdomain = str(item["subdomain"])
+        keywords = [str(keyword).lower() for keyword in item["keywords"]]
         score = sum(1 for keyword in keywords if keyword in haystack)
         if score > best[0]:
             best = (score, domain, subdomain)
@@ -360,8 +411,83 @@ def top_signal_terms(text: str, limit: int = 12) -> list[str]:
     return [term for term, _ in counts.most_common(limit)]
 
 
-def paper_sidecar_text(path: Path, digest: str) -> str:
+def run_text_command(cmd: list[str], timeout: int = 60) -> tuple[int, str, str]:
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
+        return result.returncode, result.stdout, result.stderr
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 127, "", str(exc)
+
+
+def extract_pdf_text(path: Path, max_pages: int | None = None) -> dict[str, object]:
+    min_chars = int(os.environ.get("COMPOUND_PDF_MIN_TEXT_CHARS", "400"))
+    ocr_pages = int(os.environ.get("COMPOUND_OCR_MAX_PAGES", "3"))
+    extraction = {
+        "status": "not-attempted",
+        "tool": "",
+        "text": "",
+        "stderr": "",
+        "ocr_attempted": False,
+    }
+    pdftotext = shutil.which("pdftotext")
+    if pdftotext:
+        cmd = [pdftotext, "-layout"]
+        if max_pages and max_pages > 0:
+            cmd += ["-l", str(max_pages)]
+        cmd += [str(path), "-"]
+        code, stdout, stderr = run_text_command(cmd, timeout=120)
+        extraction.update({"status": "extracted" if stdout.strip() else "empty", "tool": "pdftotext", "text": stdout.strip(), "stderr": stderr.strip()})
+        if code == 0 and len(stdout.strip()) >= min_chars:
+            return extraction
+        if code != 0:
+            extraction["status"] = "pdftotext-failed"
+    else:
+        extraction.update({"status": "pdftotext-unavailable", "stderr": "pdftotext not found"})
+
+    pdftoppm = shutil.which("pdftoppm")
+    tesseract = shutil.which("tesseract")
+    if not pdftoppm or not tesseract:
+        extraction["status"] = "ocr-required"
+        missing = []
+        if not pdftoppm:
+            missing.append("pdftoppm")
+        if not tesseract:
+            missing.append("tesseract")
+        extraction["stderr"] = (str(extraction.get("stderr") or "") + f"\nMissing OCR tools: {', '.join(missing)}").strip()
+        return extraction
+
+    extraction["ocr_attempted"] = True
+    with tempfile.TemporaryDirectory(prefix="compound-pdf-ocr-") as td:
+        prefix = str(Path(td) / "page")
+        code, _, stderr = run_text_command([pdftoppm, "-f", "1", "-l", str(max_pages or ocr_pages), "-png", str(path), prefix], timeout=120)
+        if code != 0:
+            extraction.update({"status": "ocr-render-failed", "stderr": stderr.strip()})
+            return extraction
+        chunks = []
+        for image_path in sorted(Path(td).glob("page-*.png")):
+            lang = os.environ.get("COMPOUND_TESSERACT_LANG", "eng")
+            code, stdout, stderr = run_text_command([tesseract, str(image_path), "stdout", "-l", lang], timeout=120)
+            if code != 0 and lang:
+                code, stdout, stderr = run_text_command([tesseract, str(image_path), "stdout"], timeout=120)
+            if stdout.strip():
+                chunks.append(stdout.strip())
+        text = "\n\n".join(chunks).strip()
+        extraction.update({"status": "ocr-extracted" if text else "ocr-empty", "tool": "tesseract", "text": text, "stderr": str(extraction.get("stderr") or "").strip()})
+        return extraction
+
+
+def paper_sidecar_text(path: Path, digest: str, extraction: dict[str, object] | None = None) -> str:
     stat = path.stat()
+    extraction = extraction or {}
+    status = str(extraction.get("status", "not-attempted"))
+    tool = str(extraction.get("tool", ""))
+    extracted = str(extraction.get("text", "")).strip()
+    stderr = str(extraction.get("stderr", "")).strip()
+    extracted_section = extracted if extracted else "No usable text was extracted. If this is a scanned PDF, run OCR locally and update this section or the source-summary."
+    diagnostics = f"- Extraction status: `{status}`\n- Extraction tool: `{tool or 'none'}`"
+    if stderr:
+        safe_stderr = stderr[:500].replace("`", "'")
+        diagnostics += f"\n- Diagnostics: `{safe_stderr}`"
     return textwrap.dedent(f"""\
     # {path.stem}
 
@@ -371,9 +497,13 @@ def paper_sidecar_text(path: Path, digest: str) -> str:
     - Size bytes: {stat.st_size}
     - Hash: `{digest}`
 
+    ## Extraction Diagnostics
+
+    {diagnostics}
+
     ## Extracted Text
 
-    No text extraction was performed by `compound_vault.py`. Preserve this companion note as the raw source pointer, then add extracted text or a human reading summary under `source-summaries/`.
+    {extracted_section}
     """).strip()
 
 
@@ -1066,61 +1196,61 @@ def write_source_summary(
     signals = top_signal_terms(source_text)
     signal_line = ", ".join(signals) if signals else "(none yet)"
     raw_link = path_to_wikilink(source_rel)
-    source_entries = [f"  - {source_rel}"]
+    source_entries = [source_rel]
     if original_rel:
-        source_entries.insert(0, f"  - {original_rel}")
-    source_yaml = "\n".join(source_entries)
+        source_entries.insert(0, original_rel)
     original_line = f"- Original file: `{original_rel}`" if original_rel else "- Original file: same as raw source note"
-    body = textwrap.dedent(f"""\
-    ---
-    title: "{safe_title(title).replace('"', "'")}"
-    type: source-summary
-    date: {today()}
-    updated: {today()}
-    domain: {domain}
-    subdomain: {subdomain}
-    confidence: low
-    ai-first: true
-    sources:
-    {source_yaml}
-    ---
-
-    ## For future Claude
-    This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source and original file.
-
-    # {safe_title(title)}
-
-    ## Source Trail
-
-    - Raw source note: {raw_link}
-    - Raw source path: `{source_rel}`
-    {original_line}
-
-    ## Routing
-
-    - Domain: `{domain}`
-    - Subdomain: `{subdomain}`
-    - Signal terms: {signal_line}
-
-    ## Initial Reading Judgment
-
-    - What problem does this source address?
-    - What claims, definitions, methods, or entities should become durable pages?
-    - What should be linked into the relevant MOC or query page?
-    - Is this source primarily raw material, a paper, a transcript, a study note, or a decision artifact?
-
-    ## Extracted Opening
-
-    {excerpt}
-
-    ## Follow-up
-
-    - [ ] Confirm the title and source identity.
-    - [ ] Write a concise Chinese-first summary.
-    - [ ] Extract reusable concepts and entities.
-    - [ ] Create a query page if the source is part of a learning or research direction.
-    - [ ] Add this source to the relevant query page and MOC.
-    """).rstrip() + "\n"
+    lines = [
+        "---",
+        f"title: \"{safe_title(title).replace(chr(34), chr(39))}\"",
+        "type: source-summary",
+        f"date: {today()}",
+        f"updated: {today()}",
+        f"domain: {domain}",
+        f"subdomain: {subdomain}",
+        "confidence: low",
+        "ai-first: true",
+        "sources:",
+        *[f"  - {entry}" for entry in source_entries],
+        "---",
+        "",
+        "## For future Claude",
+        "This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source and original file.",
+        "",
+        f"# {safe_title(title)}",
+        "",
+        "## Source Trail",
+        "",
+        f"- Raw source note: {raw_link}",
+        f"- Raw source path: `{source_rel}`",
+        original_line,
+        "",
+        "## Routing",
+        "",
+        f"- Domain: `{domain}`",
+        f"- Subdomain: `{subdomain}`",
+        f"- Signal terms: {signal_line}",
+        "",
+        "## Initial Reading Judgment",
+        "",
+        "- What problem does this source address?",
+        "- What claims, definitions, methods, or entities should become durable pages?",
+        "- What should be linked into the relevant MOC or query page?",
+        "- Is this source primarily raw material, a paper, a transcript, a study note, or a decision artifact?",
+        "",
+        "## Extracted Opening",
+        "",
+        excerpt,
+        "",
+        "## Follow-up",
+        "",
+        "- [ ] Confirm the title and source identity.",
+        "- [ ] Write a concise Chinese-first summary.",
+        "- [ ] Extract reusable concepts and entities.",
+        "- [ ] Create a query page if the source is part of a learning or research direction.",
+        "- [ ] Add this source to the relevant query page and MOC.",
+    ]
+    body = "\n".join(lines).rstrip() + "\n"
     write_text(path, body)
     return rel(vault, path)
 
@@ -1155,6 +1285,9 @@ def ensure_scaffold(vault: Path) -> None:
         p = vault / r
         if not p.exists():
             write_text(p, content)
+    routes = route_rules_path(vault)
+    if not routes.exists():
+        save_json(routes, default_route_rules_payload())
 
 
 def log_event(vault: Path, event: str, details: str = "") -> None:
@@ -1338,6 +1471,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     content_type = ""
     original_rel = ""
     is_pdf_source = False
+    pdf_extraction: dict[str, object] = {}
+    route_rules, route_default = load_route_rules(vault)
     if source_kind == "url":
         raw, content_type = read_url(src)
         base = slugify(src)
@@ -1353,14 +1488,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             pdf_bytes = p.read_bytes()
             digest = bytes_hash(pdf_bytes)
             title_for_pdf = safe_title(p.stem)
-            domain, subdomain = infer_domain_subdomain(title_for_pdf, "", src)
+            domain, subdomain = infer_domain_subdomain(title_for_pdf, "", src, rules=route_rules, default=route_default)
             original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
-            raw = paper_sidecar_text(p, digest)
+            pdf_extraction = extract_pdf_text(p)
+            extraction_text = str(pdf_extraction.get("text", ""))
+            if extraction_text:
+                domain, subdomain = infer_domain_subdomain(title_for_pdf, extraction_text, src, rules=route_rules, default=route_default)
+                original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
+            raw = paper_sidecar_text(p, digest, pdf_extraction)
         else:
             raw = safe_read(p, limit_bytes=args.max_bytes)
     text = normalize_source_text(raw, src, content_type)
     title = extract_title(Path(base + ".md"), text) or base
-    domain, subdomain = infer_domain_subdomain(title, text, src) if is_singularity_mode(vault) else ("", "")
+    domain, subdomain = infer_domain_subdomain(title, text, src, rules=route_rules, default=route_default) if is_singularity_mode(vault) else ("", "")
     if source_kind == "url" and is_pdf_source:
         digest = file_hash(text)
         title_for_pdf = safe_title(title)
@@ -1449,6 +1589,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "source_summary": summary_rel,
         "source_format": "pdf" if is_pdf_source else "text",
         "original_file": original_rel,
+        "pdf_extraction": {k: v for k, v in pdf_extraction.items() if k != "text"},
         "domain": domain,
         "subdomain": subdomain,
         "distributed": distributed,

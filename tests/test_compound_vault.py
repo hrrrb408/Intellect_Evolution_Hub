@@ -196,7 +196,41 @@ def test_singularity_mode_routes_by_domain_and_preserves_pdf():
         summary_text = pdf_summaries[0].read_text(encoding="utf-8")
         assert "source_format: pdf" in note_text
         assert "Preserved original: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in note_text
+        assert "## Extraction Diagnostics" in note_text
         assert "Original file: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in summary_text
+
+
+def test_singularity_route_rules_are_configurable():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        source = vault / "custom.md"
+        source.write_text(
+            "# Ancient Ritual Systems\n\nThis source is about rites, civilization, archive work, and cultural history.\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        routes = vault / ".vault-meta/singularity-routes.json"
+        assert routes.exists()
+        routes.write_text(json.dumps({
+            "schema_version": 1,
+            "default": {"domain": "engineering", "subdomain": "ai-engineering"},
+            "rules": [
+                {
+                    "domain": "society",
+                    "subdomain": "history",
+                    "keywords": ["ritual", "civilization", "cultural history"],
+                }
+            ],
+        }), encoding="utf-8")
+
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+        notes = list((vault / "raw/articles/society/history").glob("*.md"))
+        summaries = list((vault / "source-summaries/society/history").glob("*.md"))
+        assert notes
+        assert summaries
+        assert "domain: society" in notes[0].read_text(encoding="utf-8")
+        assert "Signal terms:" in summaries[0].read_text(encoding="utf-8")
 
 
 def test_nested_git_repositories_are_not_vault_notes():
