@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "template": "ieh",
+  "template_version": 1,
+  "source": "examples/ieh-vault-template",
+  "configured_at": "template",
+  "required_mode": "singularity",
+  "stage_roots": [
+    "raw/articles/{domain}/{subdomain}",
+    "raw/papers/{domain}/{subdomain}",
+    "source-summaries/{domain}/{subdomain}",
+    "concepts/{domain}/{subdomain}",
+    "entities/{domain}/{subdomain}",
+    "queries/{domain}/{subdomain}",
+    "mocs/{domain}/{subdomain}"
+  ]
+}

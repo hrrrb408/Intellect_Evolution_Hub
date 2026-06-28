@@ -60,6 +60,7 @@ DEFAULT_OLLAMA_MODEL = os.environ.get("COMPOUND_OLLAMA_MODEL", "nomic-embed-text
 OLLAMA_TIMEOUT_SEC = float(os.environ.get("COMPOUND_OLLAMA_TIMEOUT_SEC", "3"))
 EMBED_TIMEOUT_SEC = float(os.environ.get("COMPOUND_EMBED_TIMEOUT_SEC", "30"))
 MAX_OLLAMA_RESPONSE_BYTES = 4 * 1024 * 1024
+IEH_TEMPLATE_VERSION = 1
 
 WIKILINK_RE = re.compile(r"\[\[([^\[\]\|#\r\n]+)(?:#[^\[\]\|\r\n]+)?(?:\|[^\[\]\r\n]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
@@ -438,8 +439,201 @@ def untracked_stage_source_records(vault: Path, manifest: dict[str, object] | No
     return missing
 
 
+def duplicate_raw_pdfs(vault: Path) -> list[dict[str, object]]:
+    groups: dict[str, list[Path]] = defaultdict(list)
+    raw_papers = vault / "raw/papers"
+    if not raw_papers.exists():
+        return []
+    for paper in sorted(raw_papers.rglob("*.pdf")):
+        groups[path_content_hash(paper)].append(paper)
+    duplicates = []
+    for digest, paths in sorted(groups.items()):
+        if len(paths) < 2:
+            continue
+        rel_paths = [rel(vault, p) for p in sorted(paths, key=lambda item: rel(vault, item))]
+        routes = sorted({"/".join(Path(p).parts[:4]) for p in rel_paths if len(Path(p).parts) >= 4})
+        duplicates.append({
+            "content_hash": digest,
+            "count": len(rel_paths),
+            "paths": rel_paths,
+            "routes": routes,
+        })
+    return duplicates
+
+
+PROCESSED_STAGE_ROOTS = {"concepts", "entities", "queries", "mocs", "comparisons"}
+
+
+def flat_processed_stage_pages(vault: Path) -> list[str]:
+    if not is_singularity_mode(vault):
+        return []
+    flat = []
+    for root in sorted(PROCESSED_STAGE_ROOTS):
+        base = vault / root
+        if not base.exists():
+            continue
+        for page in sorted(base.glob("*.md")):
+            if page.name == ".gitkeep":
+                continue
+            flat.append(rel(vault, page))
+    return flat
+
+
+def missing_audit_artifacts(vault: Path) -> list[str]:
+    expected = [
+        "wiki/meta/rewrite-plan-latest.md",
+        "wiki/meta/source-claims-latest.json",
+        "wiki/meta/contradictions-latest.json",
+        "wiki/meta/patch-proposals-latest.md",
+        "wiki/meta/patch-proposals-latest.json",
+    ]
+    return [path for path in expected if not (vault / path).exists()]
+
+
+def manifest_missing_distributed(vault: Path, manifest: dict[str, object]) -> list[dict[str, object]]:
+    processed_exists = any((vault / root).exists() and any((vault / root).rglob("*.md")) for root in PROCESSED_STAGE_ROOTS)
+    if not processed_exists:
+        return []
+    missing = []
+    for source_key, item in sorted(manifest.get("sources", {}).items()):
+        if not isinstance(item, dict):
+            continue
+        distributed = item.get("distributed")
+        entities = distributed.get("entities", []) if isinstance(distributed, dict) else []
+        concepts = distributed.get("concepts", []) if isinstance(distributed, dict) else []
+        if not entities and not concepts:
+            missing.append({
+                "source": source_key,
+                "source_note": item.get("source_note", ""),
+                "source_summary": item.get("source_summary", ""),
+            })
+    return missing
+
+
+def processed_stage_references(vault: Path) -> dict[str, dict[str, set[str]]]:
+    refs: dict[str, dict[str, set[str]]] = defaultdict(lambda: {"entities": set(), "concepts": set()})
+    type_to_bucket = {
+        "entity": "entities",
+        "person": "entities",
+        "concept": "concepts",
+        "comparison": "concepts",
+        "moc": "concepts",
+        "query": "concepts",
+        "question": "concepts",
+    }
+    for root in sorted(PROCESSED_STAGE_ROOTS):
+        base = vault / root
+        if not base.exists():
+            continue
+        for page in sorted(base.rglob("*.md")):
+            page_rel = rel(vault, page)
+            text = safe_read(page)
+            fm = extract_frontmatter(text)
+            note_type = fm.get("type") or root.rstrip("s")
+            bucket = type_to_bucket.get(note_type, "concepts")
+            candidates = set(markdown_frontmatter_sources(text))
+            candidates.update(str(x) for x in WIKILINK_RE.findall(text))
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                refs[candidate][bucket].add(page_rel)
+                refs[Path(candidate).stem][bucket].add(page_rel)
+    return refs
+
+
+def repair_manifest_distributed_links(vault: Path, manifest: dict[str, object]) -> int:
+    refs = processed_stage_references(vault)
+    repaired = 0
+    for item in manifest.get("sources", {}).values():
+        if not isinstance(item, dict):
+            continue
+        keys = [
+            str(item.get("source_note") or ""),
+            str(item.get("source_summary") or ""),
+            Path(str(item.get("source_note") or "")).stem,
+            Path(str(item.get("source_summary") or "")).stem,
+        ]
+        entities: set[str] = set()
+        concepts: set[str] = set()
+        for key in keys:
+            if not key:
+                continue
+            entities.update(refs.get(key, {}).get("entities", set()))
+            concepts.update(refs.get(key, {}).get("concepts", set()))
+        distributed = item.get("distributed")
+        if not isinstance(distributed, dict):
+            distributed = {"entities": [], "concepts": []}
+        old_entities = set(str(x) for x in distributed.get("entities", []) if str(x))
+        old_concepts = set(str(x) for x in distributed.get("concepts", []) if str(x))
+        new_entities = old_entities | entities
+        new_concepts = old_concepts | concepts
+        if new_entities != old_entities or new_concepts != old_concepts:
+            item["distributed"] = {
+                "entities": sorted(new_entities),
+                "concepts": sorted(new_concepts),
+            }
+            repaired += 1
+    return repaired
+
+
+def git_status(vault: Path) -> dict[str, object]:
+    git_dir = vault / ".git"
+    if not git_dir.exists():
+        return {"is_repo": False, "dirty": None}
+    code, stdout, stderr = run_text_command(["git", "-C", str(vault), "status", "--short"], timeout=30)
+    if code != 0:
+        return {"is_repo": False, "dirty": None, "error": stderr.strip() or stdout.strip()}
+    return {"is_repo": True, "dirty": bool(stdout.strip()), "status": stdout.strip().splitlines()}
+
+
+def template_status(vault: Path) -> dict[str, object]:
+    payload = load_json(ieh_template_path(vault), {})
+    is_ieh = isinstance(payload, dict) and payload.get("template") == "ieh"
+    required_dirs = [
+        "raw/articles/engineering/ai-engineering",
+        "raw/papers/engineering/ai-engineering",
+        "source-summaries/engineering/ai-engineering",
+        "concepts/engineering/ai-engineering",
+        "entities/engineering/ai-engineering",
+        "queries/engineering/ai-engineering",
+        "mocs/engineering/ai-engineering",
+        "wiki/meta",
+    ]
+    missing_dirs = [path for path in required_dirs if not (vault / path).is_dir()]
+    return {
+        "is_ieh_template": is_ieh,
+        "template_version": payload.get("template_version") if isinstance(payload, dict) else None,
+        "mode": mode_config(vault)["mode"],
+        "missing_required_dirs": missing_dirs,
+    }
+
+
 def mode_path(vault: Path) -> Path:
     return meta_dir(vault) / "mode.json"
+
+
+def ieh_template_path(vault: Path) -> Path:
+    return meta_dir(vault) / "ieh-template.json"
+
+
+def mark_ieh_template(vault: Path, source: str = "compound-init") -> None:
+    save_json(ieh_template_path(vault), {
+        "schema_version": 1,
+        "template": "ieh",
+        "template_version": IEH_TEMPLATE_VERSION,
+        "source": source,
+        "configured_at": now().strftime(DATETIME_FMT),
+        "required_mode": "singularity",
+        "stage_roots": [
+            "raw/articles/{domain}/{subdomain}",
+            "raw/papers/{domain}/{subdomain}",
+            "source-summaries/{domain}/{subdomain}",
+            "concepts/{domain}/{subdomain}",
+            "entities/{domain}/{subdomain}",
+            "queries/{domain}/{subdomain}",
+            "mocs/{domain}/{subdomain}",
+        ],
+    })
 
 
 def mode_config(vault: Path) -> dict[str, object]:
@@ -487,7 +681,7 @@ DEFAULT_DOMAIN_RULES: list[dict[str, object]] = [
     {"domain": "science", "subdomain": "cognitive-science", "keywords": ("cognitive", "attention", "memory", "perception")},
     {"domain": "society", "subdomain": "history", "keywords": ("history", "culture", "civilization", "中国文化", "文化史")},
     {"domain": "business", "subdomain": "strategy", "keywords": ("strategy", "market positioning", "customer", "revenue", "product-market")},
-    {"domain": "life", "subdomain": "career", "keywords": ("career", "interview", "resume", "导师", "advisor")},
+    {"domain": "life", "subdomain": "career", "keywords": ("career", "interview", "resume", "job search", "promotion")},
 ]
 
 
@@ -1522,6 +1716,13 @@ def ensure_scaffold(vault: Path) -> None:
         save_json(routes, default_route_rules_payload())
 
 
+def ensure_ieh_scaffold(vault: Path) -> None:
+    ensure_scaffold(vault)
+    if not mode_path(vault).exists():
+        set_mode(vault, "singularity")
+    mark_ieh_template(vault)
+
+
 def log_event(vault: Path, event: str, details: str = "") -> None:
     ensure_scaffold(vault)
     line = f"- {now().strftime(DATETIME_FMT)} - {event}"
@@ -1532,11 +1733,15 @@ def log_event(vault: Path, event: str, details: str = "") -> None:
 
 def cmd_init(args: argparse.Namespace) -> int:
     vault = resolve_vault(args.vault)
-    ensure_scaffold(vault)
+    if args.template == "ieh":
+        ensure_ieh_scaffold(vault)
+    else:
+        ensure_scaffold(vault)
     build_index(vault)
     update_hot(vault, limit=args.limit)
-    log_event(vault, "compound-init", "initialized hot/index/log scaffold")
+    log_event(vault, "compound-init", f"initialized hot/index/log scaffold; template={args.template}")
     print(f"Initialized Compound Vault at {vault}")
+    print(f"- template: {args.template}")
     print(f"- {vault / 'wiki/index.md'}")
     print(f"- {vault / 'wiki/hot.md'}")
     print(f"- {vault / 'wiki/log.md'}")
@@ -1720,13 +1925,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             pdf_bytes = p.read_bytes()
             digest = bytes_hash(pdf_bytes)
             title_for_pdf = safe_title(p.stem)
-            domain, subdomain = infer_domain_subdomain(title_for_pdf, "", src, rules=route_rules, default=route_default)
-            original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
             pdf_extraction = extract_pdf_text(p)
             extraction_text = str(pdf_extraction.get("text", ""))
-            if extraction_text:
-                domain, subdomain = infer_domain_subdomain(title_for_pdf, extraction_text, src, rules=route_rules, default=route_default)
-                original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
+            domain, subdomain = infer_domain_subdomain(title_for_pdf, extraction_text, src, rules=route_rules, default=route_default)
+            original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
             raw = paper_sidecar_text(p, digest, pdf_extraction)
         else:
             raw = safe_read(p, limit_bytes=args.max_bytes)
@@ -1889,7 +2091,8 @@ def cmd_manifest_repair(args: argparse.Namespace) -> int:
             items.append({**record, "status": "repaired"})
         else:
             items.append({**record, "status": "would-repair"})
-    if args.apply and repaired:
+    distributed_repaired = repair_manifest_distributed_links(vault, manifest) if args.repair_distributed else 0
+    if args.apply and (repaired or distributed_repaired):
         save_manifest(vault, manifest)
         build_index(vault)
         build_chunk_index(vault)
@@ -1899,16 +2102,21 @@ def cmd_manifest_repair(args: argparse.Namespace) -> int:
         "apply": bool(args.apply),
         "missing": len(missing),
         "repaired": repaired,
+        "distributed_repaired": distributed_repaired if args.apply else 0,
+        "distributed_would_repair": distributed_repaired if not args.apply and args.repair_distributed else 0,
         "skipped": skipped,
         "items": items,
     }
-    log_event(vault, "compound-manifest-repair", f"dry_run={not args.apply}; missing={len(missing)}; repaired={repaired}; skipped={skipped}")
+    log_event(vault, "compound-manifest-repair", f"dry_run={not args.apply}; missing={len(missing)}; repaired={repaired}; distributed={distributed_repaired}; skipped={skipped}")
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         action = "Would repair" if not args.apply else "Repaired"
         count = repaired if args.apply else len(missing)
         print(f"{action} {count} manifest entries.")
+        if args.repair_distributed:
+            verb = "Would repair" if not args.apply else "Repaired"
+            print(f"{verb} distributed links for {distributed_repaired} manifest entries.")
         for item in items:
             print(f"- {item['status']}: {item['source']} -> {item.get('source_note')}")
     return 0
@@ -2514,6 +2722,12 @@ def health_report(vault: Path) -> dict[str, object]:
     manifest_missing = []
     pdf_extraction_issues = []
     manifest_untracked_stage_sources = untracked_stage_source_records(vault, manifest)
+    duplicate_pdfs = duplicate_raw_pdfs(vault)
+    flat_processed_pages = flat_processed_stage_pages(vault)
+    missing_distributed = manifest_missing_distributed(vault, manifest)
+    missing_audit = missing_audit_artifacts(vault)
+    git = git_status(vault)
+    template = template_status(vault)
     for source_key, item in manifest.get("sources", {}).items():
         source_note = item.get("source_note") if isinstance(item, dict) else None
         if source_note and not (vault / source_note).exists():
@@ -2541,6 +2755,12 @@ def health_report(vault: Path) -> dict[str, object]:
         "manifest_missing_sources": manifest_missing,
         "manifest_untracked_stage_sources": manifest_untracked_stage_sources,
         "pdf_extraction_issues": pdf_extraction_issues,
+        "duplicate_raw_pdfs": duplicate_pdfs,
+        "flat_processed_stage_pages": flat_processed_pages,
+        "manifest_missing_distributed": missing_distributed,
+        "missing_audit_artifacts": missing_audit,
+        "git": git,
+        "template": template,
     }
 
 
@@ -2556,6 +2776,12 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     manifest_missing = report["manifest_missing_sources"]
     manifest_untracked_stage_sources = report.get("manifest_untracked_stage_sources", [])
     pdf_extraction_issues = report.get("pdf_extraction_issues", [])
+    duplicate_raw_pdfs = report.get("duplicate_raw_pdfs", [])
+    flat_processed_stage_pages = report.get("flat_processed_stage_pages", [])
+    manifest_missing_distributed = report.get("manifest_missing_distributed", [])
+    missing_audit_artifacts = report.get("missing_audit_artifacts", [])
+    git = report.get("git", {})
+    template = report.get("template", {})
     lines = [
         "---",
         f"title: Vault Health Report {date}",
@@ -2584,6 +2810,12 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         f"- Manifest missing sources: {len(manifest_missing)}",
         f"- Manifest untracked stage sources: {len(manifest_untracked_stage_sources)}",
         f"- PDF extraction issues: {len(pdf_extraction_issues)}",
+        f"- Duplicate raw PDFs: {len(duplicate_raw_pdfs)}",
+        f"- Flat processed stage pages: {len(flat_processed_stage_pages)}",
+        f"- Manifest missing distributed links: {len(manifest_missing_distributed)}",
+        f"- Missing audit artifacts: {len(missing_audit_artifacts)}",
+        f"- Git repo: `{bool(git.get('is_repo'))}` dirty: `{git.get('dirty')}`",
+        f"- IEH template: `{bool(template.get('is_ieh_template'))}` mode: `{template.get('mode')}` missing dirs: `{len(template.get('missing_required_dirs', []))}`",
         f"- Generated staleness hours: `{json.dumps(report['generated_staleness_hours'], ensure_ascii=False)}`",
         "",
         "## Dead Links",
@@ -2626,6 +2858,34 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
             lines.append(f"- `{item['source_note']}` status=`{item['status']}` diagnostics=`{item['diagnostics']}`")
     else:
         lines.append("None.")
+    lines += ["", "## Duplicate Raw PDFs", ""]
+    if duplicate_raw_pdfs:
+        for item in duplicate_raw_pdfs[:100]:
+            lines.append(f"- hash `{item['content_hash']}` routes={', '.join('`' + r + '`' for r in item.get('routes', []))}")
+            for duplicate_path in item.get("paths", [])[:20]:
+                lines.append(f"  - `{duplicate_path}`")
+    else:
+        lines.append("None.")
+    lines += ["", "## Flat Processed Stage Pages", ""]
+    lines += [f"- `{x}`" for x in flat_processed_stage_pages[:200]] or ["None."]
+    lines += ["", "## Manifest Missing Distributed Links", ""]
+    if manifest_missing_distributed:
+        for item in manifest_missing_distributed[:100]:
+            lines.append(f"- `{item['source']}` -> `{item.get('source_summary') or item.get('source_note')}`")
+    else:
+        lines.append("None.")
+    lines += ["", "## Missing Audit Artifacts", ""]
+    lines += [f"- `{x}`" for x in missing_audit_artifacts] or ["None."]
+    lines += ["", "## Git Status", ""]
+    if git.get("is_repo"):
+        lines.append(f"- Repo: true; dirty: `{git.get('dirty')}`")
+    else:
+        lines.append(f"- Repo: false{'; ' + git.get('error', '') if git.get('error') else ''}")
+    lines += ["", "## IEH Template Status", ""]
+    lines.append(f"- IEH template marker: `{bool(template.get('is_ieh_template'))}`")
+    lines.append(f"- Mode: `{template.get('mode')}`")
+    missing_dirs = template.get("missing_required_dirs", [])
+    lines += [f"- Missing required dir: `{x}`" for x in missing_dirs] or ["- Missing required dir: None."]
     text = "\n".join(lines).rstrip() + "\n"
     write_text(path, text)
     write_text(vault / "wiki/meta/lint-report-latest.md", text)
@@ -3509,8 +3769,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--vault", help="Obsidian vault path. Defaults to OBSIDIAN_VAULT_PATH or cwd.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("init", help="Create wiki/hot.md, wiki/index.md, wiki/log.md scaffold")
+    sp = sub.add_parser("init", help="Create IEH/Compound Vault scaffold")
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--template", choices=["ieh", "generic"], default="ieh",
+                    help="Template to initialize. Default is IEH singularity stage model.")
     sp.set_defaults(func=cmd_init)
 
     sp = sub.add_parser("index", help="Rebuild wiki/index.md and wiki/meta/index.json")
@@ -3538,6 +3800,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("manifest-repair", help="Repair manifest entries for existing raw/source-summary stage files")
     sp.add_argument("--apply", action="store_true", help="Write repaired manifest entries. Default is dry-run.")
+    sp.add_argument("--repair-distributed", action="store_true",
+                    help="Backfill distributed concept/entity links from existing processed stage pages.")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_manifest_repair)
 

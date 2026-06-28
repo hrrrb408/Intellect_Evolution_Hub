@@ -1,51 +1,66 @@
 ---
-description: Scan your vault and generate a _CLAUDE.md operating manual, index.md catalog, and log.md pointer
+description: Bootstrap an IEH vault with the project template, runtime manuals, index, hot cache, and operation log
 category: meta
-triggers_en: ["init vault", "bootstrap vault", "setup vault", "scan vault"]
+triggers_en: ["init vault", "bootstrap vault", "setup vault", "scan vault", "initialize IEH"]
+argument-hint: "[vault path]"
+allowed-tools: Bash, Read
 ---
 
-Use the obsidian-second-brain skill. Execute `/obsidian-init`:
+# /obsidian-init
 
-1. Call `list_files_in_vault()` to map the full vault structure
-2. Spawn parallel subagents to discover vault context simultaneously:
-   - **Dashboard agent**: read `Home.md` or equivalent dashboard
-   - **Templates agent**: read all files in `Templates/`
-   - **Boards agent**: read all files in `Boards/`
-   - **Samples agent**: read one existing note per major folder to capture naming conventions and frontmatter patterns
-3. Merge all agent results into a complete picture of the vault
-4. Generate a complete `_CLAUDE.md` using the template in `~/.claude/skills/obsidian-second-brain/references/claude-md-template.md`, filled with real values from the vault
-5. Generate `index.md` at the vault root - a catalog of all pages organized by category:
-   - List every note in the vault grouped by folder (Projects, People, Ideas, etc.)
-   - Include a one-line description for each note (from frontmatter or first paragraph)
-   - Claude reads this file FIRST when navigating the vault - cheaper and faster than searching
-   - Format: `- [[Note Name]] — brief description`
-6. Initialize the vault operations log:
-   - Create `Logs/` directory at the vault root
-   - Write `log.md` at the vault root as a thin pointer file: explains the per-day structure, points at `Logs/`, and ships the entry template (do NOT put log entries in `log.md` itself)
-   - Write today's `Logs/YYYY-MM-DD.md` with the init entry: `**HH:MM** - init | Vault initialized with _CLAUDE.md, index.md, Logs/`
-   - Per-day file format: frontmatter (`type: log`, `date`, `ai-first: true`) + `**HH:MM** - action | description` entries, append-only
-7. Create `Bases/` at the vault root if it does not exist. Stamp the four premade base files from `~/.claude/skills/obsidian-second-brain/references/bases/`:
+Initialize a vault as an IEH knowledge base. This command must not fall back to
+the upstream obsidian-second-brain default PARA/template layout unless the user
+explicitly asks for legacy compatibility.
 
-   | Template | Output file | Obsidian-style folder | Wiki-style folder |
-   |---|---|---|---|
-   | `projects.base.template` | `Bases/Projects.base` | `Projects` | `wiki/projects` |
-   | `people.base.template` | `Bases/People.base` | `People` | `wiki/entities` |
-   | `tasks.base.template` | `Bases/Tasks.base` | `Tasks` | `wiki/tasks` |
-   | `daily.base.template` | `Bases/Daily.base` | `Daily` | `wiki/daily` |
+## Procedure
 
-   Detect vault style from the folder structure discovered in step 1: if `wiki/` exists at the root, use wiki-style folder names; otherwise use obsidian-style. For each template, replace the `{{FOLDER}}` placeholder with the correct folder name, then write to `Bases/`.
+1. Resolve the vault path from `$ARGUMENTS`, `$OBSIDIAN_VAULT_PATH`, or the current working directory.
+2. Run the IEH Compound Vault initializer:
 
-   Skip any base file that already exists in `Bases/` - never overwrite.
+```bash
+SCRIPT=""
+for candidate in \
+  scripts/compound_vault.py \
+  .codex/scripts/compound_vault.py \
+  .gemini/scripts/compound_vault.py \
+  .opencode/scripts/compound_vault.py \
+  "$HOME/.claude/skills/obsidian-second-brain/scripts/compound_vault.py"; do
+  if [ -f "$candidate" ]; then
+    SCRIPT="$candidate"
+    break
+  fi
+done
+if [ -z "$SCRIPT" ]; then
+  echo "compound_vault.py not found. Run from the skill checkout or install a built platform dist into the vault." >&2
+  exit 2
+fi
 
-8. Write `_CLAUDE.md`, `index.md`, root `log.md` (pointer), `Logs/YYYY-MM-DD.md` (today's entries), and any new `Bases/*.base` files
-9. Confirm what was written and tell the user to restart their Claude session so the new files take effect
+if [ -n "$ARGUMENTS" ]; then
+  python3 "$SCRIPT" --vault "$ARGUMENTS" init --template ieh
+else
+  python3 "$SCRIPT" init --template ieh
+fi
+```
 
-If `_CLAUDE.md` already exists: show a diff of what would change and ask before overwriting.
-If `index.md` already exists: regenerate it (it's always a fresh catalog of current vault state).
-If a monolithic `log.md` already exists with `## YYYY-MM-DD` sections: run `python ~/.claude/skills/obsidian-second-brain/scripts/migrate_log.py --vault <vault-path>` to split it into `Logs/YYYY-MM-DD.md` files. Do not overwrite manually.
+3. Confirm these files/directories exist:
+   - `.vault-meta/ieh-template.json`
+   - `.vault-meta/mode.json` with `mode: singularity`
+   - `raw/articles/engineering/ai-engineering/`
+   - `raw/papers/engineering/ai-engineering/`
+   - `source-summaries/engineering/ai-engineering/`
+   - `concepts/engineering/ai-engineering/`
+   - `entities/engineering/ai-engineering/`
+   - `queries/engineering/ai-engineering/`
+   - `mocs/engineering/ai-engineering/`
+   - `wiki/hot.md`, `wiki/index.md`, `wiki/log.md`
+4. If runtime manuals are missing, create IEH-style `_CLAUDE.md`, `CODEX-DESKTOP.md`, `CLAUDE-DESKTOP.md`, `HERMES.md`, and `AGENTS.md` from the repo template or the installed desktop adapter.
+5. Run `python3 "$SCRIPT" health --json` and read `wiki/meta/lint-report-latest.md`.
+6. If this is a new vault and no `.git/` directory exists, tell the user to create a baseline commit before ingesting large batches.
 
----
+## Rules
 
-**AI-first rule:** Every note created or updated by this command MUST follow `references/ai-first-rules.md` - `## For future Claude` preamble, rich frontmatter (`type`, `date`, `tags`, `ai-first: true`, plus type-specific fields), recency markers per external claim, mandatory `[[wikilinks]]` for every person/project/concept referenced, sources preserved verbatim with URLs inline, and confidence levels where applicable. The vault is for future-Claude retrieval - not human reading.
-
-**Anti-fabrication:** Search exhaustively before claiming any note, person, or file is absent - false absence is the most common failure mode - and never invent facts, entities, or dates (mark unknowns as `TBD`). See the anti-fabrication and search-completeness hard rules in `references/ai-first-rules.md`.
+- IEH is the product template; obsidian-second-brain is the engine/runtime.
+- Do not initialize new IEH vaults with the legacy upstream template.
+- Do not overwrite existing personal manuals without showing the diff or asking the user.
+- Every PDF or attachment ingest after initialization must go through `/obsidian-compound-ingest`.
+- A healthy new IEH vault should have no flat processed pages under `concepts/*.md`, `entities/*.md`, `queries/*.md`, `mocs/*.md`, or `comparisons/*.md`; processed pages belong under `{domain}/{subdomain}/`.

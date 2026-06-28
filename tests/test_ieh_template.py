@@ -35,8 +35,11 @@ def test_ieh_template_initializes_cleanly():
         assert payload["orphan_pages"] == []
         assert payload["missing_frontmatter"] == []
         assert payload["missing_ai_first"] == []
+        assert payload["template"]["is_ieh_template"] is True
+        assert payload["template"]["mode"] == "singularity"
         assert (vault / "raw/articles").is_dir()
         assert (vault / "source-summaries").is_dir()
         assert (vault / "concepts").is_dir()
         assert (vault / "queries").is_dir()
         assert (vault / ".vault-meta/singularity-routes.json").is_file()
+        assert (vault / ".vault-meta/ieh-template.json").is_file()

@@ -18,7 +18,7 @@ def test_init_ingest_query_health():
         vault = Path(td)
         source = vault / "sample.md"
         source.write_text("# Project Alpha\n\nProject Alpha uses Obsidian and Claude for project memory. [[Decision One]] matters. Project Alpha has 3 active workflows in 2026.\n", encoding="utf-8")
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         assert (vault / "wiki/index.md").exists()
         assert (vault / "wiki/hot.md").exists()
         assert (vault / "wiki/log.md").exists()
@@ -116,7 +116,7 @@ def test_init_ingest_query_health():
 def test_mode_routing_and_chunks():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "para")
         routed = run("--vault", str(vault), "mode", "route", "source", "Test Source")
         assert "wiki/resources/incoming/test-source.md" in routed.stdout
@@ -133,7 +133,7 @@ def test_mode_routing_and_chunks():
 def test_retrieval_false_notes_are_not_indexed_or_queried():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         good = vault / "concepts/Good Retrieval.md"
         good.parent.mkdir(parents=True, exist_ok=True)
         good.write_text(
@@ -170,7 +170,7 @@ def test_singularity_mode_ingest_uses_stage_model():
             "# Test-Time Adaptation Paper\n\nThis paper studies test-time adaptation under distribution shift for robust visual recognition.\n",
             encoding="utf-8",
         )
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         routed = run("--vault", str(vault), "mode", "route", "source", "Test-Time Adaptation Paper")
         assert "raw/articles/engineering/ai-engineering/test-time-adaptation-paper.md" in routed.stdout
@@ -207,7 +207,7 @@ def test_singularity_mode_routes_by_domain_and_preserves_pdf():
         fake_pdf = vault / "clip-paper.pdf"
         fake_pdf.write_bytes(b"%PDF-1.4\nfake clip foundation model distribution shift paper\n%%EOF\n")
 
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         run("--vault", str(vault), "ingest", str(finance_source), "--no-distribute")
         finance_notes = list((vault / "raw/articles/finance/markets").glob("*.md"))
@@ -240,7 +240,7 @@ def test_singularity_route_rules_are_configurable():
             "# Ancient Ritual Systems\n\nThis source is about rites, civilization, archive work, and cultural history.\n",
             encoding="utf-8",
         )
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         routes = vault / ".vault-meta/singularity-routes.json"
         assert routes.exists()
@@ -273,7 +273,7 @@ def test_routes_command_and_fusion_apply_create_stage_scaffolds():
             "# Attention Mechanisms\n\nAttention Mechanisms connect brain cortex attention, neuroscience, and cognitive control.\n",
             encoding="utf-8",
         )
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         route_test = json.loads(run("--vault", str(vault), "routes", "test", "Attention Mechanisms", "--text", "transformer neural retrieval").stdout)
         assert route_test["domain"] == "engineering"
@@ -326,7 +326,7 @@ def test_routes_command_and_fusion_apply_create_stage_scaffolds():
 def test_health_reports_pdf_extraction_issues():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         source_note = vault / "raw/articles/engineering/ai-engineering/scanned.md"
         source_note.parent.mkdir(parents=True, exist_ok=True)
         source_note.write_text(
@@ -357,7 +357,7 @@ def test_health_reports_pdf_extraction_issues():
 def test_manifest_repair_registers_stage_model_sources():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         paper = vault / "raw/papers/engineering/ai-engineering/example-paper.pdf"
         article = vault / "raw/articles/engineering/ai-engineering/example-paper.md"
@@ -398,6 +398,88 @@ def test_manifest_repair_registers_stage_model_sources():
         assert health_after["manifest_untracked_stage_sources"] == []
 
 
+def test_health_reports_ieh_quality_gate_issues():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        pdf_a = vault / "raw/papers/engineering/ai-engineering/example.pdf"
+        pdf_b = vault / "raw/papers/life/career/example.pdf"
+        pdf_a.parent.mkdir(parents=True, exist_ok=True)
+        pdf_b.parent.mkdir(parents=True, exist_ok=True)
+        pdf_a.write_bytes(b"%PDF-1.4\nsame\n%%EOF\n")
+        pdf_b.write_bytes(b"%PDF-1.4\nsame\n%%EOF\n")
+        flat = vault / "concepts/flat-concept.md"
+        flat.write_text(
+            "---\ntitle: Flat Concept\ntype: concept\nai-first: true\n---\n\n"
+            "## For future Claude\nFlat page.\n\n# Flat Concept\n",
+            encoding="utf-8",
+        )
+        manifest = {
+            "schema_version": 1,
+            "sources": {
+                "file:/tmp/example.pdf": {
+                    "source_note": "raw/articles/engineering/ai-engineering/example.md",
+                    "source_summary": "source-summaries/engineering/ai-engineering/example.md",
+                    "source_format": "pdf",
+                    "domain": "engineering",
+                    "subdomain": "ai-engineering",
+                    "distributed": {"entities": [], "concepts": []},
+                }
+            },
+        }
+        (vault / ".vault-meta/compound-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert len(health["duplicate_raw_pdfs"]) == 1
+        assert health["flat_processed_stage_pages"] == ["concepts/flat-concept.md"]
+        assert len(health["manifest_missing_distributed"]) == 1
+        assert health["missing_audit_artifacts"]
+        assert health["git"]["is_repo"] is False
+
+
+def test_manifest_repair_backfills_distributed_links():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        summary = vault / "source-summaries/engineering/ai-engineering/example-paper.md"
+        concept = vault / "concepts/engineering/ai-engineering/example-concept.md"
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        concept.parent.mkdir(parents=True, exist_ok=True)
+        summary.write_text(
+            "---\ntitle: Example Paper\ntype: source-summary\nai-first: true\nsources:\n"
+            "  - raw/articles/engineering/ai-engineering/example-paper.md\n---\n\n"
+            "## For future Claude\nSummary.\n\n# Example Paper\n",
+            encoding="utf-8",
+        )
+        concept.write_text(
+            "---\ntitle: Example Concept\ntype: concept\nai-first: true\nsources:\n"
+            "  - source-summaries/engineering/ai-engineering/example-paper.md\n---\n\n"
+            "## For future Claude\nConcept.\n\n# Example Concept\n\n[[example-paper]]\n",
+            encoding="utf-8",
+        )
+        manifest = {
+            "schema_version": 1,
+            "sources": {
+                "file:/tmp/example-paper.pdf": {
+                    "source_note": "raw/articles/engineering/ai-engineering/example-paper.md",
+                    "source_summary": "source-summaries/engineering/ai-engineering/example-paper.md",
+                    "source_format": "pdf",
+                    "domain": "engineering",
+                    "subdomain": "ai-engineering",
+                    "distributed": {"entities": [], "concepts": []},
+                }
+            },
+        }
+        (vault / ".vault-meta/compound-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        dry = json.loads(run("--vault", str(vault), "manifest-repair", "--repair-distributed", "--json").stdout)
+        assert dry["distributed_would_repair"] == 1
+        applied = json.loads(run("--vault", str(vault), "manifest-repair", "--repair-distributed", "--apply", "--json").stdout)
+        assert applied["distributed_repaired"] == 1
+        repaired = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+        assert repaired["sources"]["file:/tmp/example-paper.pdf"]["distributed"]["concepts"] == [
+            "concepts/engineering/ai-engineering/example-concept.md"
+        ]
+
+
 def test_source_summary_extracts_reading_card_sections():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
@@ -409,7 +491,7 @@ def test_source_summary_extracts_reading_card_sections():
             "## Conclusion\n\nRetrieval memory improves adaptation when the source context is preserved.\n",
             encoding="utf-8",
         )
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         run("--vault", str(vault), "mode", "set", "singularity")
         run("--vault", str(vault), "ingest", str(source), "--no-distribute")
         summary = next((vault / "source-summaries/engineering/ai-engineering").glob("*.md"))
@@ -423,7 +505,7 @@ def test_source_summary_extracts_reading_card_sections():
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
-        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "init", "--template", "generic")
         nested = vault / "nested-project"
         (nested / ".git").mkdir(parents=True)
         (nested / "README.md").write_text(

@@ -1,5 +1,5 @@
 ---
-description: Initialize Compound Vault files: wiki/hot.md, wiki/index.md, wiki/log.md, sources, entities, concepts, projects, decisions, questions, and meta.
+description: Initialize an IEH Compound Vault: stage-model folders, wiki/hot.md, wiki/index.md, wiki/log.md, routes, manifest metadata, and health-ready scaffold.
 category: meta
 triggers_en: ["initialize compound vault", "setup compound vault", "create hot index log", "obsidian compound init"]
 argument-hint: "[vault path]"
@@ -8,9 +8,9 @@ allowed-tools: Bash, Read
 
 # /obsidian-compound-init
 
-Initialize the Compound Vault layer on top of obsidian-second-brain.
+Initialize the IEH Compound Vault layer on top of obsidian-second-brain.
 
-This does not delete or rewrite existing notes. It creates missing files and directories under `wiki/`.
+This does not delete or rewrite existing notes. It creates missing IEH stage-model files and directories, marks the vault with `.vault-meta/ieh-template.json`, and defaults the vault to `singularity` mode when no mode has been configured.
 
 ## Procedure
 
@@ -41,4 +41,10 @@ else
 fi
 ```
 
-Then read `wiki/index.md` and `wiki/hot.md` to confirm the scaffold exists.
+Then read `wiki/index.md`, `wiki/hot.md`, and `.vault-meta/ieh-template.json` to confirm the IEH scaffold exists.
+
+## Rules
+
+- New IEH vaults MUST use the default `init` behavior, which is `--template ieh`.
+- Use `--template generic` only for legacy obsidian-second-brain compatibility checks.
+- Any runtime that initializes a user vault must create or preserve `.vault-meta/ieh-template.json`.

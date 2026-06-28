@@ -1,5 +1,5 @@
 ---
-description: Run Compound Vault health checks: dead wikilinks, orphan pages, missing frontmatter, stale hot/index, and index gaps.
+description: Run IEH/Compound Vault health checks: links, frontmatter, manifest, duplicate raw PDFs, stage-model layout, audit artifacts, template marker, and git baseline.
 category: meta
 triggers_en: ["compound health", "check compound vault", "compound vault health", "lint compound vault"]
 argument-hint: "[--fix-index]"
@@ -44,4 +44,6 @@ Then read `wiki/meta/lint-report-latest.md` and summarize the action items.
 - Never auto-delete notes.
 - Current checks include dead links, orphan pages, missing frontmatter,
   missing `ai-first: true`, duplicate titles, manifest pointers, stale generated
-  files, and index gaps.
+  files, index gaps, duplicate raw PDFs by content hash, flat processed
+  stage-model pages, missing manifest distributed links, missing latest audit
+  artifacts, IEH template marker, and git baseline status.
