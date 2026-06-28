@@ -45,6 +45,13 @@ INPUT=$(cat)
 INTERRUPTED=$(printf '%s' "$INPUT" | jq -r '.extra.interrupted // false' 2>/dev/null || echo "false")
 [[ "$INTERRUPTED" == "true" ]] && { emit_noop; exit 0; }
 
+# Prevent recursive hook storms. The consolidation command is expected to start
+# its own Hermes session with `--source obsidian-hook`; when that child session
+# ends, Hermes fires on_session_end again. Do not consolidate hook-originated
+# sessions.
+SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // .extra.source // ""' 2>/dev/null || echo "")
+[[ "$SOURCE" == "obsidian-hook" ]] && { emit_noop; exit 0; }
+
 SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
 TODAY=$(date +%Y-%m-%d)
 
