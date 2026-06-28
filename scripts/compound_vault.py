@@ -1885,7 +1885,7 @@ def read_url(url: str, timeout: int = 20, max_bytes: int = 2_000_000) -> tuple[s
 
 def normalize_source_text(raw: str, source: str, content_type: str = "") -> str:
     # Lightweight HTML cleanup, not a full parser; good enough for today-use ingestion.
-    text = raw
+    text = raw.replace("\x00", "")
     if "html" in content_type or "<html" in raw[:1000].lower():
         text = re.sub(r"(?is)<script.*?</script>", "", text)
         text = re.sub(r"(?is)<style.*?</style>", "", text)

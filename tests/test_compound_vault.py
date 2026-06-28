@@ -502,6 +502,19 @@ def test_source_summary_extracts_reading_card_sections():
         assert "Retrieval Memory Paper" in text
 
 
+def test_ingest_strips_nul_bytes_from_markdown_outputs():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        source = vault / "nul-source.md"
+        source.write_text("# NUL Paper\n\nAbstract\x00 text for retrieval memory.\n", encoding="utf-8")
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+        source_note = next((vault / "raw/articles").rglob("*.md"))
+        summary = next((vault / "source-summaries").rglob("*.md"))
+        assert "\x00" not in source_note.read_text(encoding="utf-8")
+        assert "\x00" not in summary.read_text(encoding="utf-8")
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
