@@ -204,6 +204,23 @@ def iter_markdown(vault: Path, include_generated: bool = True) -> Iterator[Path]
         yield path
 
 
+def retrieval_disabled(vault: Path, path: Path, text: str | None = None) -> bool:
+    try:
+        sample = text if text is not None else safe_read(path, limit_bytes=4096)
+    except Exception:
+        return False
+    fm = extract_frontmatter(sample)
+    value = (fm.get("retrieval") or fm.get("index") or "").strip().lower()
+    return value in {"false", "no", "off", "disabled", "exclude", "quarantine"}
+
+
+def iter_retrievable_markdown(vault: Path, include_generated: bool = False) -> Iterator[Path]:
+    for path in iter_markdown(vault, include_generated=include_generated):
+        if retrieval_disabled(vault, path):
+            continue
+        yield path
+
+
 def tokenize(text: str) -> list[str]:
     tokens = [m.group(0).lower() for m in WORD_RE.finditer(text)]
     # keep English-ish words and single CJK chars; filter very tiny ASCII noise
@@ -287,6 +304,138 @@ def load_manifest(vault: Path) -> dict[str, object]:
 
 def save_manifest(vault: Path, manifest: dict[str, object]) -> None:
     save_json(manifest_path(vault), manifest)
+
+
+def markdown_frontmatter_sources(text: str) -> list[str]:
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return []
+    sources: list[str] = []
+    in_sources = False
+    for line in m.group(1).splitlines():
+        stripped = line.strip()
+        if stripped == "sources:":
+            in_sources = True
+            continue
+        if in_sources:
+            if stripped.startswith("- "):
+                sources.append(stripped[2:].strip().strip('"').strip("'"))
+                continue
+            if stripped and not line.startswith((" ", "\t")):
+                in_sources = False
+    return [s for s in sources if s]
+
+
+def path_content_hash(path: Path) -> str:
+    try:
+        return bytes_hash(path.read_bytes())
+    except OSError:
+        return file_hash(str(path))
+
+
+def infer_domain_subdomain_from_rel(path_rel: str) -> tuple[str, str]:
+    parts = Path(path_rel).parts
+    if len(parts) >= 4 and parts[0] == "raw":
+        return slugify(parts[2]), slugify(parts[3])
+    if len(parts) >= 3 and parts[0] in {
+        "source-summaries", "concepts", "entities", "queries",
+        "comparisons", "mocs",
+    }:
+        return slugify(parts[1]), slugify(parts[2])
+    return "engineering", "ai-engineering"
+
+
+def manifest_tracked_paths(manifest: dict[str, object]) -> set[str]:
+    tracked: set[str] = set()
+    for key, item in manifest.get("sources", {}).items():
+        if not isinstance(item, dict):
+            continue
+        if isinstance(key, str) and key.startswith("vault:"):
+            tracked.add(key.removeprefix("vault:"))
+        for field in ("source", "source_note", "source_summary", "original_file"):
+            value = item.get(field)
+            if isinstance(value, str) and value and not re.match(r"^[a-z]+:", value):
+                tracked.add(value)
+    return tracked
+
+
+def discover_stage_source_records(vault: Path) -> list[dict[str, object]]:
+    summary_by_source: dict[str, str] = {}
+    source_summary_root = vault / "source-summaries"
+    if source_summary_root.exists():
+        for summary in sorted(source_summary_root.rglob("*.md")):
+            summary_rel = rel(vault, summary)
+            for source in markdown_frontmatter_sources(safe_read(summary)):
+                if (vault / source).exists():
+                    summary_by_source[source] = summary_rel
+
+    article_by_stem: dict[str, str] = {}
+    raw_articles = vault / "raw/articles"
+    if raw_articles.exists():
+        for article in sorted(raw_articles.rglob("*.md")):
+            article_by_stem[article.stem] = rel(vault, article)
+
+    records: list[dict[str, object]] = []
+    seen_notes: set[str] = set()
+    raw_papers = vault / "raw/papers"
+    if raw_papers.exists():
+        for paper in sorted(raw_papers.rglob("*.pdf")):
+            paper_rel = rel(vault, paper)
+            article_rel = article_by_stem.get(paper.stem, "")
+            summary_rel = summary_by_source.get(paper_rel) or summary_by_source.get(article_rel, "")
+            source_note = article_rel or summary_rel
+            if not source_note:
+                continue
+            domain, subdomain = infer_domain_subdomain_from_rel(paper_rel)
+            records.append({
+                "source_key": f"vault:{paper_rel}",
+                "source": paper_rel,
+                "source_kind": "vault-file",
+                "source_format": "pdf",
+                "content_hash": path_content_hash(paper),
+                "source_note": source_note,
+                "source_summary": summary_rel,
+                "original_file": paper_rel,
+                "domain": domain,
+                "subdomain": subdomain,
+            })
+            seen_notes.add(source_note)
+
+    if raw_articles.exists():
+        for article in sorted(raw_articles.rglob("*.md")):
+            article_rel = rel(vault, article)
+            if article_rel in seen_notes:
+                continue
+            summary_rel = summary_by_source.get(article_rel, "")
+            domain, subdomain = infer_domain_subdomain_from_rel(article_rel)
+            records.append({
+                "source_key": f"vault:{article_rel}",
+                "source": article_rel,
+                "source_kind": "vault-file",
+                "source_format": "text",
+                "content_hash": path_content_hash(article),
+                "source_note": article_rel,
+                "source_summary": summary_rel,
+                "original_file": "",
+                "domain": domain,
+                "subdomain": subdomain,
+            })
+
+    return records
+
+
+def untracked_stage_source_records(vault: Path, manifest: dict[str, object] | None = None) -> list[dict[str, object]]:
+    manifest = manifest or load_manifest(vault)
+    tracked = manifest_tracked_paths(manifest)
+    missing = []
+    for record in discover_stage_source_records(vault):
+        source = str(record["source"])
+        source_note = str(record.get("source_note") or "")
+        source_summary = str(record.get("source_summary") or "")
+        if source in tracked or source_note in tracked or source_summary in tracked:
+            continue
+        missing.append(record)
+    return missing
 
 
 def mode_path(vault: Path) -> Path:
@@ -1396,7 +1545,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def build_index(vault: Path) -> list[NoteInfo]:
     ensure_scaffold(vault)
-    notes = [analyze_note(vault, p) for p in sorted(iter_markdown(vault, include_generated=False), key=lambda x: rel(vault, x).lower())]
+    notes = [analyze_note(vault, p) for p in sorted(iter_retrievable_markdown(vault, include_generated=False), key=lambda x: rel(vault, x).lower())]
     by_type: dict[str, list[NoteInfo]] = defaultdict(list)
     for n in notes:
         by_type[n.note_type].append(n)
@@ -1460,7 +1609,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def update_hot(vault: Path, limit: int = 20) -> list[NoteInfo]:
     ensure_scaffold(vault)
-    all_paths = list(iter_markdown(vault, include_generated=False))
+    all_paths = list(iter_retrievable_markdown(vault, include_generated=False))
     paths = sorted(all_paths, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
     notes = [analyze_note(vault, p) for p in paths]
     log_tail = tail_lines(vault / "wiki/log.md", 20)
@@ -1699,6 +1848,72 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_manifest_repair(args: argparse.Namespace) -> int:
+    vault = resolve_vault(args.vault)
+    ensure_scaffold(vault)
+    manifest = load_manifest(vault)
+    missing = untracked_stage_source_records(vault, manifest)
+    repaired = 0
+    skipped = 0
+    items: list[dict[str, object]] = []
+    repaired_at = now().strftime(DATETIME_FMT)
+    for record in missing:
+        source_key = str(record["source_key"])
+        if source_key in manifest["sources"]:
+            skipped += 1
+            items.append({**record, "status": "already-tracked"})
+            continue
+        manifest_item = {
+            "source": record["source"],
+            "source_kind": record["source_kind"],
+            "content_hash": record["content_hash"],
+            "ingested_at": repaired_at,
+            "repaired_at": repaired_at,
+            "source_note": record["source_note"],
+            "source_summary": record.get("source_summary") or "",
+            "source_format": record["source_format"],
+            "original_file": record.get("original_file") or "",
+            "domain": record.get("domain") or "",
+            "subdomain": record.get("subdomain") or "",
+            "distributed": {"entities": [], "concepts": []},
+            "rewrite_plan": "",
+            "analysis": {},
+            "repair": {
+                "method": "stage-source-scan",
+                "reason": "raw/source-summary stage files existed without manifest provenance",
+            },
+        }
+        if args.apply:
+            manifest["sources"][source_key] = manifest_item
+            repaired += 1
+            items.append({**record, "status": "repaired"})
+        else:
+            items.append({**record, "status": "would-repair"})
+    if args.apply and repaired:
+        save_manifest(vault, manifest)
+        build_index(vault)
+        build_chunk_index(vault)
+        update_hot(vault)
+    report = {
+        "dry_run": not args.apply,
+        "apply": bool(args.apply),
+        "missing": len(missing),
+        "repaired": repaired,
+        "skipped": skipped,
+        "items": items,
+    }
+    log_event(vault, "compound-manifest-repair", f"dry_run={not args.apply}; missing={len(missing)}; repaired={repaired}; skipped={skipped}")
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        action = "Would repair" if not args.apply else "Repaired"
+        count = repaired if args.apply else len(missing)
+        print(f"{action} {count} manifest entries.")
+        for item in items:
+            print(f"- {item['status']}: {item['source']} -> {item.get('source_note')}")
+    return 0
+
+
 @dataclass
 class SearchHit:
     path: str
@@ -1714,7 +1929,7 @@ class SearchHit:
 
 def load_docs(vault: Path) -> list[tuple[Path, str, NoteInfo]]:
     docs = []
-    for p in iter_markdown(vault, include_generated=False):
+    for p in iter_retrievable_markdown(vault, include_generated=False):
         try:
             text = safe_read(p)
             docs.append((p, text, analyze_note(vault, p)))
@@ -1761,7 +1976,7 @@ def build_chunk_index(vault: Path) -> dict[str, object]:
         postings: dict[str, list[list[object]]] = defaultdict(list)
         chunk_count = 0
 
-        for path in sorted(iter_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
+        for path in sorted(iter_retrievable_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
             try:
                 text = safe_read(path)
                 info = analyze_note(vault, path)
@@ -2163,7 +2378,7 @@ def cmd_query(args: argparse.Namespace) -> int:
         "title: Last Compound Vault Query",
         "type: query-result",
         f"updated: {now().strftime(DATETIME_FMT)}",
-        f"query: \"{args.question.replace('"', "'")}\"",
+        f"query: \"{args.question.replace(chr(34), chr(39))}\"",
         "ai-first: true",
         "---",
         "",
@@ -2293,11 +2508,12 @@ def health_report(vault: Path) -> dict[str, object]:
             index_paths = {x["path"] for x in json.loads(index_json.read_text(encoding="utf-8"))}
         except Exception:
             index_paths = set()
-    actual_paths = {rel(vault, p) for p in note_paths}
+    actual_paths = {rel(vault, p) for p in note_paths if not retrieval_disabled(vault, p)}
     index_missing = sorted(actual_paths - index_paths) if index_paths else sorted(actual_paths)
     manifest = load_manifest(vault)
     manifest_missing = []
     pdf_extraction_issues = []
+    manifest_untracked_stage_sources = untracked_stage_source_records(vault, manifest)
     for source_key, item in manifest.get("sources", {}).items():
         source_note = item.get("source_note") if isinstance(item, dict) else None
         if source_note and not (vault / source_note).exists():
@@ -2323,6 +2539,7 @@ def health_report(vault: Path) -> dict[str, object]:
         "generated_staleness_hours": generated_staleness,
         "index_missing_paths": index_missing,
         "manifest_missing_sources": manifest_missing,
+        "manifest_untracked_stage_sources": manifest_untracked_stage_sources,
         "pdf_extraction_issues": pdf_extraction_issues,
     }
 
@@ -2337,6 +2554,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     index_missing = report["index_missing_paths"]
     duplicate_titles = report["duplicate_titles"]
     manifest_missing = report["manifest_missing_sources"]
+    manifest_untracked_stage_sources = report.get("manifest_untracked_stage_sources", [])
     pdf_extraction_issues = report.get("pdf_extraction_issues", [])
     lines = [
         "---",
@@ -2364,6 +2582,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         f"- Duplicate titles: {len(duplicate_titles)}",
         f"- Index missing paths: {len(index_missing)}",
         f"- Manifest missing sources: {len(manifest_missing)}",
+        f"- Manifest untracked stage sources: {len(manifest_untracked_stage_sources)}",
         f"- PDF extraction issues: {len(pdf_extraction_issues)}",
         f"- Generated staleness hours: `{json.dumps(report['generated_staleness_hours'], ensure_ascii=False)}`",
         "",
@@ -2393,6 +2612,12 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     if manifest_missing:
         for item in manifest_missing[:100]:
             lines.append(f"- `{item['source']}` -> `{item['source_note']}`")
+    else:
+        lines.append("None.")
+    lines += ["", "## Manifest Untracked Stage Sources", ""]
+    if manifest_untracked_stage_sources:
+        for item in manifest_untracked_stage_sources[:100]:
+            lines.append(f"- `{item['source']}` -> `{item.get('source_note', '')}`")
     else:
         lines.append("None.")
     lines += ["", "## PDF Extraction Issues", ""]
@@ -3310,6 +3535,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(rewrite_plan=True)
     sp.set_defaults(analyze_claims=True)
     sp.set_defaults(func=cmd_ingest)
+
+    sp = sub.add_parser("manifest-repair", help="Repair manifest entries for existing raw/source-summary stage files")
+    sp.add_argument("--apply", action="store_true", help="Write repaired manifest entries. Default is dry-run.")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_manifest_repair)
 
     sp = sub.add_parser("query", help="Return top matching vault notes as JSON and write wiki/meta/last-query.md")
     sp.add_argument("question")

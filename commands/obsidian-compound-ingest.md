@@ -12,6 +12,21 @@ Ingest a source into the Compound Vault source layer, refresh generated context,
 record manifest/delta state, and create low-confidence entity/concept stubs when
 deterministic candidates are visible.
 
+## Non-negotiable ingest rule
+
+For any user request like "ingest this PDF", "ingest into IEH", "add these
+attachments", or "把这些材料喂进知识库", this command is the first step.
+
+Do **not** bypass it by manually writing `raw/papers/`, `raw/articles/`,
+`source-summaries/`, `concepts/`, `queries/`, or `mocs/` first. Manual
+stage-model synthesis is a follow-up step after the manifest-aware ingest has
+recorded source provenance, hashes, extraction diagnostics, claims,
+contradictions, and patch proposals.
+
+If a previous runtime already created stage-model files without this entrypoint,
+run `/obsidian-manifest-repair` as a dry-run, then apply only after reviewing the
+proposed manifest entries.
+
 ## Procedure
 
 ```bash

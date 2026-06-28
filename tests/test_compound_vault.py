@@ -130,6 +130,38 @@ def test_mode_routing_and_chunks():
         assert payload["chunk_count"] >= 1
 
 
+def test_retrieval_false_notes_are_not_indexed_or_queried():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        good = vault / "concepts/Good Retrieval.md"
+        good.parent.mkdir(parents=True, exist_ok=True)
+        good.write_text(
+            "---\ntitle: Good Retrieval\ntype: concept\nai-first: true\n---\n\n"
+            "## For future Claude\nTrusted retrieval note.\n\n"
+            "# Good Retrieval\n\ntrusted-anchor-token durable knowledge.\n",
+            encoding="utf-8",
+        )
+        quarantine = vault / "entities/Noisy Stub.md"
+        quarantine.parent.mkdir(parents=True, exist_ok=True)
+        quarantine.write_text(
+            "---\ntitle: Noisy Stub\ntype: entity\nai-first: true\nretrieval: false\n---\n\n"
+            "## For future Claude\nQuarantined generated stub.\n\n"
+            "# Noisy Stub\n\nnoisy-anchor-token should not be retrieved.\n",
+            encoding="utf-8",
+        )
+
+        run("--vault", str(vault), "index")
+        index_text = (vault / "wiki/index.md").read_text(encoding="utf-8")
+        assert "Good Retrieval" in index_text
+        assert "Noisy Stub" not in index_text
+
+        hits = json.loads(run("--vault", str(vault), "query", "noisy-anchor-token", "--refresh", "--rerank", "none").stdout)
+        assert all(hit["path"] != "entities/Noisy Stub.md" for hit in hits)
+        health_payload = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert "entities/Noisy Stub.md" not in health_payload["index_missing_paths"]
+
+
 def test_singularity_mode_ingest_uses_stage_model():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
@@ -322,6 +354,50 @@ def test_health_reports_pdf_extraction_issues():
         assert "PDF extraction issues: 1" in (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
 
 
+def test_manifest_repair_registers_stage_model_sources():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        paper = vault / "raw/papers/engineering/ai-engineering/example-paper.pdf"
+        article = vault / "raw/articles/engineering/ai-engineering/example-paper.md"
+        summary = vault / "source-summaries/engineering/ai-engineering/example-paper.md"
+        paper.parent.mkdir(parents=True, exist_ok=True)
+        article.parent.mkdir(parents=True, exist_ok=True)
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        paper.write_bytes(b"%PDF-1.4\nexample paper\n%%EOF\n")
+        article.write_text(
+            "---\ntitle: Example Paper\ntype: source\nai-first: true\n---\n\n"
+            "## For future Claude\nRaw extracted text.\n\n# Example Paper\n\nBody.\n",
+            encoding="utf-8",
+        )
+        summary.write_text(
+            "---\ntitle: Example Paper\ntype: source-summary\nai-first: true\nsources:\n"
+            "  - raw/papers/engineering/ai-engineering/example-paper.pdf\n"
+            "  - raw/articles/engineering/ai-engineering/example-paper.md\n---\n\n"
+            "## For future Claude\nSummary.\n\n# Example Paper\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "index")
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert len(health["manifest_untracked_stage_sources"]) == 1
+        assert health["manifest_untracked_stage_sources"][0]["source_format"] == "pdf"
+        dry = json.loads(run("--vault", str(vault), "manifest-repair", "--json").stdout)
+        assert dry["dry_run"] is True
+        assert dry["missing"] == 1
+        assert dry["repaired"] == 0
+        applied = json.loads(run("--vault", str(vault), "manifest-repair", "--apply", "--json").stdout)
+        assert applied["dry_run"] is False
+        assert applied["repaired"] == 1
+        manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+        item = manifest["sources"]["vault:raw/papers/engineering/ai-engineering/example-paper.pdf"]
+        assert item["source_note"] == "raw/articles/engineering/ai-engineering/example-paper.md"
+        assert item["source_summary"] == "source-summaries/engineering/ai-engineering/example-paper.md"
+        assert item["repair"]["method"] == "stage-source-scan"
+        health_after = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert health_after["manifest_untracked_stage_sources"] == []
+
+
 def test_source_summary_extracts_reading_card_sections():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
@@ -370,7 +446,7 @@ def test_nested_git_repositories_are_not_vault_notes():
 
 
 if __name__ == "__main__":
-    test_init_ingest_query_health()
-    test_mode_routing_and_chunks()
-    test_nested_git_repositories_are_not_vault_notes()
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
     print("ok")

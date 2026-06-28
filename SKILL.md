@@ -106,7 +106,7 @@ See `references/vault-schema.md` for full structural details.
 ## Core Operating Principles
 
 ### AI-first vault rule (applies to every note)
-The vault is designed for **future-Claude** to read and reason over, not for human review. Every note Claude writes - across all 58 commands - must follow `references/ai-first-rules.md`:
+The vault is designed for **future-Claude** to read and reason over, not for human review. Every note Claude writes - across all 59 commands - must follow `references/ai-first-rules.md`:
 
 1. **Self-contained context** - each note explains itself; don't rely on backlinks alone
 2. **"For future Claude" preamble** - 2-3 sentence summary so Claude can decide relevance in 10 seconds
@@ -631,6 +631,7 @@ without replacing the original obsidian-second-brain workflows.
 - `/obsidian-compound-save` appends a concise memory/update to `wiki/log.md`, refreshes `wiki/hot.md`, and then patches durable notes when needed.
 - `/obsidian-compound-chunks` rebuilds `.vault-meta/chunks/` and `.vault-meta/bm25/index.json` for chunk-level retrieval.
 - `/obsidian-apply-proposals` dry-runs or safely applies generated `append_evidence` and `append_timeline` proposals; contradiction reviews stay manual.
+- `/obsidian-manifest-repair` dry-runs or repairs `.vault-meta/compound-manifest.json` when raw/source-summary stage files were created outside the manifest-aware ingest path.
 - `/obsidian-fusion` plans or safely creates missing SINGULARITY stage-model scaffolds from a source note, then updates MOC links.
 - `/obsidian-routes` lists, tests, or adds configurable SINGULARITY domain/subdomain routing rules.
 - `/obsidian-mode` gets, sets, or previews methodology routing for generic, LYT, PARA, Zettelkasten, and SINGULARITY.

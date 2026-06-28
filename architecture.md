@@ -10,7 +10,7 @@ Last reviewed against commit `ff0319c` (2026-06-05).
 
 obsidian-second-brain is a cross-CLI **skill** (not a plugin, not a hosted service) that turns any Obsidian vault into an AI-first second brain. One platform-neutral command source compiles to four AI CLIs - Claude Code, Codex CLI, Gemini CLI, OpenCode - through a build-time adapter pattern. At runtime a slash command reads and writes the user's vault as plain markdown; commands shell out to Python helpers for anything deterministic (vault health, research fetches, codebase scans).
 
-- **58 commands**, grouped by `category:` frontmatter: vault 21, thinking 13, research 9, meta 15.
+- **59 commands**, grouped by `category:` frontmatter: vault 21, thinking 13, research 9, meta 16.
 - **40 commands are cross-platform.** The 4 Google Calendar commands (`/obsidian-agenda`, `/obsidian-calendar`, `/obsidian-meeting`, `/obsidian-schedule`) carry `exclude: [codex-cli, gemini-cli, opencode]` and ship Claude Code only, because they depend on the Google Calendar MCP.
 - A research toolkit that is key-less by default (free public sources) and uses Grok + Perplexity + Gemini when keys are present.
 - An opt-in background agent plus optional user-scheduled agents.
@@ -38,7 +38,7 @@ The AI-first vault rule ties it all together: every note a command writes is des
 
 | Path | Role |
 |---|---|
-| `commands/` | 58 slash-command definitions, one `.md` each. The platform-neutral source and the product surface. |
+| `commands/` | 59 slash-command definitions, one `.md` each. The platform-neutral source and the product surface. |
 | `references/` | Shared specs the commands link to. `ai-first-rules.md` is the canonical, non-negotiable vault-write spec. |
 | `scripts/` | Python and Shell engine: build orchestrator, vault tooling, research toolkit, codebase scanner. |
 | `adapters/` | Platform translation layer. `lib.sh` plus one `adapter.sh` per CLI. |
@@ -53,7 +53,7 @@ The AI-first vault rule ties it all together: every note a command writes is des
 
 ```
 obsidian-second-brain/
-|-- commands/            # 58 command .md files (the source)
+|-- commands/            # 59 command .md files (the source)
 |-- references/          # ai-first-rules.md (canonical) + schemas + templates + bases/
 |-- scripts/             # build.sh, lib.sh, vault tooling, research/, architect_scan.py, ...
 |-- adapters/            # lib.sh + {claude-code,codex-cli,gemini-cli,opencode}/adapter.sh
@@ -71,7 +71,7 @@ obsidian-second-brain/
 ```mermaid
 graph TD
   REF["references/<br/>specs (ai-first-rules.md = canonical)"]
-  CMD["commands/<br/>58 .md, platform-neutral source"]
+  CMD["commands/<br/>59 .md, platform-neutral source"]
   SCR["scripts/<br/>engine + research toolkit + build.sh"]
   ADP["adapters/<br/>lib.sh + 4 platform adapters"]
   HK["hooks/<br/>validate-ai-first, context loader, bg-agent"]
@@ -108,10 +108,10 @@ AI-powered research and ingestion; findings save to the vault following the AI-f
 
 `/research` `/research-deep` `/notebooklm` `/x-read` `/x-pulse` `/youtube` `/podcast` `/obsidian-ingest` `/obsidian-compound-ingest`
 
-### Meta (15)
+### Meta (16)
 Bootstrap, audit, export, visualize, document, and extend the system itself.
 
-`/obsidian-init` `/obsidian-health` `/obsidian-export` `/obsidian-visualize` `/obsidian-architect` `/obsidian-compound-init` `/obsidian-compound-health` `/obsidian-compound-chunks` `/obsidian-apply-proposals` `/obsidian-fusion` `/obsidian-routes` `/obsidian-mode` `/obsidian-desktop-setup` `/obsidian-desktop-install` `/create-command`
+`/obsidian-init` `/obsidian-health` `/obsidian-export` `/obsidian-visualize` `/obsidian-architect` `/obsidian-compound-init` `/obsidian-compound-health` `/obsidian-compound-chunks` `/obsidian-manifest-repair` `/obsidian-apply-proposals` `/obsidian-fusion` `/obsidian-routes` `/obsidian-mode` `/obsidian-desktop-setup` `/obsidian-desktop-install` `/create-command`
 
 ---
 
