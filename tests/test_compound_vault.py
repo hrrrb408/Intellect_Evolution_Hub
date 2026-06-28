@@ -446,8 +446,7 @@ def test_nested_git_repositories_are_not_vault_notes():
 
 
 if __name__ == "__main__":
-    test_init_ingest_query_health()
-    test_mode_routing_and_chunks()
-    test_retrieval_false_notes_are_not_indexed_or_queried()
-    test_nested_git_repositories_are_not_vault_notes()
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
     print("ok")

@@ -13,15 +13,20 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.request
 from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from vault_health import load_vault, check_broken_links
+try:
+    from .vault_health import load_vault, check_broken_links
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from vault_health import load_vault, check_broken_links
 
 LINK_IN_MSG = re.compile(r"Broken link \[\[(.+?)\]\]")
-MODEL = "claude-haiku-4-5"
+DEFAULT_MODEL = os.environ.get("OBSIDIAN_TRIAGE_MODEL") or os.environ.get("ANTHROPIC_MODEL") or "claude-3-5-haiku-latest"
 
 PROMPT = """You triage a broken wikilink in a personal Obsidian vault written with AI help.
 The link points to a note that does not exist yet.
@@ -39,9 +44,9 @@ DELETE - a typo, a one-off, or junk; the link should just be removed
 Reply as: WORD - up to 6 word reason"""
 
 
-def ask_claude(note, line, link, key):
+def ask_claude(note, line, link, key, model):
     body = json.dumps({
-        "model": MODEL,
+        "model": model,
         "max_tokens": 40,
         "messages": [{"role": "user",
                       "content": PROMPT.format(note=note, line=line[:300], link=link)}],
@@ -124,6 +129,7 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--from", dest="src", help="prior triage output to act on")
     ap.add_argument("--create-cap", type=int, default=5)
+    ap.add_argument("--model", default=DEFAULT_MODEL, help="Anthropic model name; defaults to OBSIDIAN_TRIAGE_MODEL, ANTHROPIC_MODEL, then a Haiku latest alias")
     args = ap.parse_args()
     vault = Path(args.path).expanduser()
 
@@ -157,7 +163,7 @@ def main():
     for link, rel in unique:
         if n >= args.limit:
             break
-        verdict, text = ask_claude(Path(rel).stem, line_for(vault, rel, link), link, key)
+        verdict, text = ask_claude(Path(rel).stem, line_for(vault, rel, link), link, key, args.model)
         tally[verdict] += 1
         n += 1
         print(f"  {verdict:<7} [[{link}]]  ({text.split('-',1)[-1].strip()[:40]})")

@@ -25,12 +25,17 @@ Run it for real, bounded to N safe fixes, recounting each pass so you can watch:
 """
 import argparse
 import re
+import sys
 from collections import Counter
 from difflib import get_close_matches
 from pathlib import Path
 
 # reuse the EXACT detection the health check uses, so our count == its count
-from vault_health import load_vault, check_broken_links
+try:
+    from .vault_health import load_vault, check_broken_links
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from vault_health import load_vault, check_broken_links
 
 DECORATION = re.compile(r"[#|].*$")          # a #heading anchor or |display alias
 LINK_IN_MSG = re.compile(r"Broken link \[\[(.+?)\]\]")
