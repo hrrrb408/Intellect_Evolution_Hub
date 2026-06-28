@@ -31,6 +31,11 @@
 
 emit_noop() { printf '{}\n'; }
 
+# Defense-in-depth recursion guard. Child sessions started by this hook inherit
+# this environment variable and must never trigger another consolidation pass,
+# even if Hermes does not include `--source` in the hook payload.
+[[ "${OBSIDIAN_HERMES_SUPPRESS_SESSION_END_HOOK:-0}" == "1" ]] && { emit_noop; exit 0; }
+
 VAULT="${OBSIDIAN_VAULT_PATH:-}"
 [[ -z "$VAULT" ]] && { emit_noop; exit 0; }
 
@@ -52,6 +57,18 @@ INTERRUPTED=$(printf '%s' "$INPUT" | jq -r '.extra.interrupted // false' 2>/dev/
 SOURCE=$(printf '%s' "$INPUT" | jq -r '.source // .extra.source // ""' 2>/dev/null || echo "")
 [[ "$SOURCE" == "obsidian-hook" ]] && { emit_noop; exit 0; }
 
+VAULT_HASH=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$VAULT")
+SENTINEL="/tmp/obsidian-hermes-session-end.${VAULT_HASH}.active"
+if [[ -e "$SENTINEL" ]]; then
+  NOW_EPOCH=$(date +%s)
+  SENTINEL_MTIME=$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$SENTINEL" 2>/dev/null || echo "$NOW_EPOCH")
+  if (( NOW_EPOCH - SENTINEL_MTIME < 1800 )); then
+    emit_noop
+    exit 0
+  fi
+  rm -f "$SENTINEL"
+fi
+
 SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null || echo "unknown")
 TODAY=$(date +%Y-%m-%d)
 
@@ -67,7 +84,10 @@ nothing. Triggered by Hermes on_session_end for session $SESSION_ID."
 # on the command's stdin.
 CONSOLIDATE_CMD="${OBSIDIAN_HERMES_CONSOLIDATE_CMD:-hermes run --quiet}"
 
+touch "$SENTINEL" 2>/dev/null || { emit_noop; exit 0; }
 (
+  export OBSIDIAN_HERMES_SUPPRESS_SESSION_END_HOOK=1
+  trap 'rm -f "$SENTINEL"' EXIT
   cd "$VAULT" 2>/dev/null && \
   printf '%s' "$PROMPT" | $CONSOLIDATE_CMD >> /tmp/obsidian-hermes-session-end.log 2>&1
 ) &
