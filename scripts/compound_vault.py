@@ -204,6 +204,23 @@ def iter_markdown(vault: Path, include_generated: bool = True) -> Iterator[Path]
         yield path
 
 
+def retrieval_disabled(vault: Path, path: Path, text: str | None = None) -> bool:
+    try:
+        sample = text if text is not None else safe_read(path, limit_bytes=4096)
+    except Exception:
+        return False
+    fm = extract_frontmatter(sample)
+    value = (fm.get("retrieval") or fm.get("index") or "").strip().lower()
+    return value in {"false", "no", "off", "disabled", "exclude", "quarantine"}
+
+
+def iter_retrievable_markdown(vault: Path, include_generated: bool = False) -> Iterator[Path]:
+    for path in iter_markdown(vault, include_generated=include_generated):
+        if retrieval_disabled(vault, path):
+            continue
+        yield path
+
+
 def tokenize(text: str) -> list[str]:
     tokens = [m.group(0).lower() for m in WORD_RE.finditer(text)]
     # keep English-ish words and single CJK chars; filter very tiny ASCII noise
@@ -1528,7 +1545,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def build_index(vault: Path) -> list[NoteInfo]:
     ensure_scaffold(vault)
-    notes = [analyze_note(vault, p) for p in sorted(iter_markdown(vault, include_generated=False), key=lambda x: rel(vault, x).lower())]
+    notes = [analyze_note(vault, p) for p in sorted(iter_retrievable_markdown(vault, include_generated=False), key=lambda x: rel(vault, x).lower())]
     by_type: dict[str, list[NoteInfo]] = defaultdict(list)
     for n in notes:
         by_type[n.note_type].append(n)
@@ -1592,7 +1609,7 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def update_hot(vault: Path, limit: int = 20) -> list[NoteInfo]:
     ensure_scaffold(vault)
-    all_paths = list(iter_markdown(vault, include_generated=False))
+    all_paths = list(iter_retrievable_markdown(vault, include_generated=False))
     paths = sorted(all_paths, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
     notes = [analyze_note(vault, p) for p in paths]
     log_tail = tail_lines(vault / "wiki/log.md", 20)
@@ -1912,7 +1929,7 @@ class SearchHit:
 
 def load_docs(vault: Path) -> list[tuple[Path, str, NoteInfo]]:
     docs = []
-    for p in iter_markdown(vault, include_generated=False):
+    for p in iter_retrievable_markdown(vault, include_generated=False):
         try:
             text = safe_read(p)
             docs.append((p, text, analyze_note(vault, p)))
@@ -1959,7 +1976,7 @@ def build_chunk_index(vault: Path) -> dict[str, object]:
         postings: dict[str, list[list[object]]] = defaultdict(list)
         chunk_count = 0
 
-        for path in sorted(iter_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
+        for path in sorted(iter_retrievable_markdown(vault, include_generated=False), key=lambda p: rel(vault, p).lower()):
             try:
                 text = safe_read(path)
                 info = analyze_note(vault, path)
@@ -2491,7 +2508,7 @@ def health_report(vault: Path) -> dict[str, object]:
             index_paths = {x["path"] for x in json.loads(index_json.read_text(encoding="utf-8"))}
         except Exception:
             index_paths = set()
-    actual_paths = {rel(vault, p) for p in note_paths}
+    actual_paths = {rel(vault, p) for p in note_paths if not retrieval_disabled(vault, p)}
     index_missing = sorted(actual_paths - index_paths) if index_paths else sorted(actual_paths)
     manifest = load_manifest(vault)
     manifest_missing = []

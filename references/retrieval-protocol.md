@@ -13,6 +13,8 @@ Use this when answering from the vault.
    - Remote `OLLAMA_URL` is blocked unless `--allow-remote-ollama` is passed.
 5. Top notes only.
 
+Notes with frontmatter `retrieval: false` are retained in the vault but excluded from `wiki/index.md`, `wiki/hot.md`, chunked BM25, and query results. Use this for quarantined deterministic stubs, generated extraction artifacts, and audit-only pages that should not answer user questions.
+
 ## Command
 
 ```bash

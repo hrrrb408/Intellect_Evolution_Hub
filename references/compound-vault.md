@@ -62,5 +62,6 @@ This overlay adds claude-obsidian-style vault mechanics to obsidian-second-brain
 - Never rewrite the whole vault.
 - Prefer minimal patches.
 - Preserve raw sources.
+- Use `retrieval: false` on audit-only or quarantined generated stubs instead of deleting them; generated index, hot cache, and BM25 query skip those notes while health still checks their structure.
 - Never auto-apply `review_contradiction`; it requires manual confirmation.
 - Use `scripts/wiki-lock.sh` before editing existing notes in concurrent sessions.

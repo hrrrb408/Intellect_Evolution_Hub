@@ -130,6 +130,38 @@ def test_mode_routing_and_chunks():
         assert payload["chunk_count"] >= 1
 
 
+def test_retrieval_false_notes_are_not_indexed_or_queried():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init")
+        good = vault / "concepts/Good Retrieval.md"
+        good.parent.mkdir(parents=True, exist_ok=True)
+        good.write_text(
+            "---\ntitle: Good Retrieval\ntype: concept\nai-first: true\n---\n\n"
+            "## For future Claude\nTrusted retrieval note.\n\n"
+            "# Good Retrieval\n\ntrusted-anchor-token durable knowledge.\n",
+            encoding="utf-8",
+        )
+        quarantine = vault / "entities/Noisy Stub.md"
+        quarantine.parent.mkdir(parents=True, exist_ok=True)
+        quarantine.write_text(
+            "---\ntitle: Noisy Stub\ntype: entity\nai-first: true\nretrieval: false\n---\n\n"
+            "## For future Claude\nQuarantined generated stub.\n\n"
+            "# Noisy Stub\n\nnoisy-anchor-token should not be retrieved.\n",
+            encoding="utf-8",
+        )
+
+        run("--vault", str(vault), "index")
+        index_text = (vault / "wiki/index.md").read_text(encoding="utf-8")
+        assert "Good Retrieval" in index_text
+        assert "Noisy Stub" not in index_text
+
+        hits = json.loads(run("--vault", str(vault), "query", "noisy-anchor-token", "--refresh", "--rerank", "none").stdout)
+        assert all(hit["path"] != "entities/Noisy Stub.md" for hit in hits)
+        health_payload = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert "entities/Noisy Stub.md" not in health_payload["index_missing_paths"]
+
+
 def test_singularity_mode_ingest_uses_stage_model():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
@@ -416,5 +448,6 @@ def test_nested_git_repositories_are_not_vault_notes():
 if __name__ == "__main__":
     test_init_ingest_query_health()
     test_mode_routing_and_chunks()
+    test_retrieval_false_notes_are_not_indexed_or_queried()
     test_nested_git_repositories_are_not_vault_notes()
     print("ok")
