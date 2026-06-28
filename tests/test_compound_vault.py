@@ -188,7 +188,7 @@ def test_singularity_mode_ingest_uses_stage_model():
         assert summaries
         raw_text = raw_notes[0].read_text(encoding="utf-8")
         summary_text = summaries[0].read_text(encoding="utf-8")
-        assert "Complete the matching `source-summaries/` page" in raw_text
+        assert "完成对应 `source-summaries/` 阅读脚手架" in raw_text
         assert "sources:\n  - raw/articles/engineering/ai-engineering/" in summary_text
         run("--vault", str(vault), "index")
         index_text = (vault / "wiki/index.md").read_text(encoding="utf-8")
@@ -215,7 +215,7 @@ def test_singularity_mode_routes_by_domain_and_preserves_pdf():
         assert finance_notes
         assert finance_summaries
         assert "domain: finance" in finance_notes[0].read_text(encoding="utf-8")
-        assert "Subdomain: `markets`" in finance_summaries[0].read_text(encoding="utf-8")
+        assert "子领域 / Subdomain: `markets`" in finance_summaries[0].read_text(encoding="utf-8")
 
         run("--vault", str(vault), "ingest", str(fake_pdf), "--no-distribute")
         pdf_notes = list((vault / "raw/articles/engineering/ai-engineering").glob("*clip-paper*.md"))
@@ -227,9 +227,11 @@ def test_singularity_mode_routes_by_domain_and_preserves_pdf():
         note_text = pdf_notes[0].read_text(encoding="utf-8")
         summary_text = pdf_summaries[0].read_text(encoding="utf-8")
         assert "source_format: pdf" in note_text
-        assert "Preserved original: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in note_text
-        assert "## Extraction Diagnostics" in note_text
-        assert "Original file: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in summary_text
+        assert "保存的 PDF 原件 / Preserved original: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in note_text
+        assert "## 抽取诊断 / Extraction Diagnostics" in note_text
+        assert "## Extracted Text" not in note_text
+        assert "原始文件 / Original file: `raw/papers/engineering/ai-engineering/clip-paper.pdf`" in summary_text
+        assert "## 自动阅读卡 / Auto Reading Card" in summary_text
 
 
 def test_singularity_route_rules_are_configurable():
@@ -496,7 +498,8 @@ def test_source_summary_extracts_reading_card_sections():
         run("--vault", str(vault), "ingest", str(source), "--no-distribute")
         summary = next((vault / "source-summaries/engineering/ai-engineering").glob("*.md"))
         text = summary.read_text(encoding="utf-8")
-        assert "## Auto Reading Card" in text
+        assert "## 自动阅读卡 / Auto Reading Card" in text
+        assert "## 中文精读摘要 / Chinese-first Reading Notes" in text
         assert "retrieval memory for language model agents" in text
         assert "persistent memory bank" in text
         assert "Retrieval Memory Paper" in text

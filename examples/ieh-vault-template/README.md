@@ -20,7 +20,6 @@ From the `obsidian-second-brain` repository root:
 ```bash
 cp -R examples/ieh-vault-template /path/to/NewVault
 python3 scripts/compound_vault.py --vault /path/to/NewVault init
-python3 scripts/compound_vault.py --vault /path/to/NewVault mode set singularity
 python3 scripts/install_desktop.py /path/to/NewVault --json
 python3 scripts/compound_vault.py --vault /path/to/NewVault health --json
 ```
@@ -46,6 +45,16 @@ Then open `/path/to/NewVault` in Obsidian.
 - Codex Desktop installed `.codex/` and `.agents/` directories.
 - Local `.git/` history.
 - Obsidian workspace state.
+
+## IEH conventions
+
+- PDF originals live in `raw/papers/`; `raw/articles/` keeps compact source
+  notes only, not full duplicated PDF text.
+- Generated reading scaffolds are Chinese-first bilingual. Keep English method
+  names, metrics, datasets, and source excerpts when they matter.
+- `wiki/` is runtime space only: `hot.md`, `index.md`, `log.md`, and `meta/`.
+  Do not put durable knowledge into legacy `wiki/entities` or `wiki/concepts`
+  paths.
 
 ## First ingest
 

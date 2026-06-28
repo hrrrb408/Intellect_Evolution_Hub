@@ -40,8 +40,10 @@ raw/ -> source-summaries/ -> concepts|entities|comparisons -> queries/ -> mocs/
 
 Use:
 
-- `raw/` for original or near-original material.
-- `source-summaries/` for one-source reading scaffolds.
+- `raw/` for original material plus compact source notes. For PDFs, keep the
+  original under `raw/papers/` and do not duplicate full extracted text into
+  markdown.
+- `source-summaries/` for Chinese-first bilingual one-source reading scaffolds.
 - `concepts/` for reusable ideas, methods, mechanisms, definitions.
 - `entities/` for people, labs, tools, papers, projects, datasets.
 - `comparisons/` for method and concept comparisons.
@@ -65,6 +67,8 @@ Runtime files are generated or tool-facing:
 
 Use runtime files for retrieval and operation. Do not cite generated reports as
 durable sources when a raw source exists.
+IEH does not use legacy `wiki/entities`, `wiki/concepts`, or `wiki/resources`
+as durable knowledge folders.
 
 ## Writing rules
 

@@ -43,3 +43,6 @@ def test_ieh_template_initializes_cleanly():
         assert (vault / "queries").is_dir()
         assert (vault / ".vault-meta/singularity-routes.json").is_file()
         assert (vault / ".vault-meta/ieh-template.json").is_file()
+        assert not (vault / "wiki/entities").exists()
+        assert not (vault / "wiki/concepts").exists()
+        assert not (vault / "wiki/resources/incoming").exists()

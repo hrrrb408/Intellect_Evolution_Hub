@@ -158,8 +158,7 @@ IEH/
 |   |-- hot.md
 |   |-- index.md
 |   |-- log.md
-|   |-- meta/
-|   `-- resources/
+|   `-- meta/
 |-- .vault-meta/
 |   |-- compound-manifest.json
 |   |-- desktop-install-manifest.json
@@ -173,14 +172,15 @@ IEH/
 
 目录说明：
 
-- `raw/` 保存原始材料的可追溯副本。PDF 原件通常放在 `raw/papers/`，抽取文本放在 `raw/articles/`。
-- `source-summaries/` 是单 source 阅读脚手架，用于保留摘要、贡献、方法、证据和后续链接。
+- `raw/` 保存原始材料的可追溯副本。PDF 原件放在 `raw/papers/`；`raw/articles/` 只保存轻量 source note、抽取诊断和开头摘录，不再重复保存完整 PDF 文本。
+- `source-summaries/` 是单 source 阅读脚手架，用于保留摘要、贡献、方法、证据和后续链接。IEH 默认生成中文优先、英文术语保留的双语结构。
 - `concepts/` 是可复用概念，不等同于单篇论文标题页。
 - `entities/` 是人物、机构、工具、论文、数据集等稳定对象。
 - `queries/` 是学习问题、研究问题和判断入口，适合承载综合性理解。
 - `comparisons/` 是多 source 横向比较。
 - `mocs/` 是领域导航，不承载长篇正文。
 - `maintenance/` 放 vault-wide 维护文档、lint 规则、迁移记录。
+- `wiki/` 是 runtime 层，不是知识内容目录。IEH 模式下只使用 `wiki/hot.md`、`wiki/index.md`、`wiki/log.md` 和 `wiki/meta/`。
 - `wiki/hot.md` 是最近上下文缓存。
 - `wiki/index.md` 是可读索引。
 - `wiki/log.md` 是操作日志。
@@ -950,8 +950,8 @@ python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest /path/to
 2. 使用 `pdftotext` 抽取正文。
 3. 判断文本质量。
 4. 如需要，尝试 `pdftoppm` + `tesseract` OCR fallback。
-5. 写入 `raw/articles/...`。
-6. 写入 `source-summaries/...`。
+5. 写入轻量 `raw/articles/...` source note，不重复保存完整抽取文本。
+6. 写入中文优先双语 `source-summaries/...`。
 7. 生成 claims、contradictions、patch proposals、rewrite plan。
 8. 刷新 index/hot/chunks。
 
@@ -1269,7 +1269,8 @@ raw/papers/**/*.pdf
 说明：
 
 - PDF 原件可能很大，不建议直接纳入 vault git。
-- `raw/articles/`、`source-summaries/`、`concepts/`、`entities/`、`queries/`、`mocs/` 建议纳入版本管理。
+- `raw/articles/` 是轻量 source note，建议纳入版本管理。
+- `source-summaries/`、`concepts/`、`entities/`、`queries/`、`mocs/` 建议纳入版本管理。
 - `.vault-meta/compound-manifest.json` 建议纳入版本管理，因为它是 source 账本。
 - `.vault-meta/chunks/` 和 BM25 index 可再生成，通常不纳入 git。
 

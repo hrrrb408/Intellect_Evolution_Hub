@@ -22,8 +22,8 @@ raw/ -> source-summaries/ -> concepts|entities|comparisons -> queries/ -> mocs/
 
 ## Knowledge layer
 
-- `raw/`: original source files or near-original extractions.
-- `source-summaries/`: one-source reading notes.
+- `raw/`: original source files plus compact source notes. PDF full text is not duplicated into markdown.
+- `source-summaries/`: Chinese-first bilingual one-source reading notes.
 - `concepts/`: reusable ideas, methods, mechanisms, definitions.
 - `entities/`: people, labs, organizations, tools, papers, projects, datasets.
 - `comparisons/`: method and framework comparison pages.
@@ -46,6 +46,8 @@ raw/ -> source-summaries/ -> concepts|entities|comparisons -> queries/ -> mocs/
 - `DESKTOP-ADAPTERS.md`: desktop handoff guide.
 
 Do not treat generated runtime reports as final durable knowledge.
+IEH does not use `wiki/entities/`, `wiki/concepts`, or `wiki/resources/` as
+knowledge folders. Those are legacy/generic compatibility paths only.
 
 ## Domain taxonomy
 
@@ -64,8 +66,8 @@ Domains express primary use case:
 
 - Preserve source material first.
 - Put original PDFs under `raw/papers/<domain>/<subdomain>/`.
-- Put text extraction or near-original markdown under
-  `raw/articles/<domain>/<subdomain>/`.
+- Put compact source notes under `raw/articles/<domain>/<subdomain>/`.
+  For PDFs, do not duplicate the full extracted text into git-tracked markdown.
 - Put single-source summaries under
   `source-summaries/<domain>/<subdomain>/`.
 - Put reusable synthesis under `concepts/`, `entities/`, `comparisons/`,
@@ -79,6 +81,8 @@ Domains express primary use case:
 - Every durable note needs a `## For future Claude` section.
 - Filenames use stable English kebab-case slugs.
 - Raw material may keep original language.
+- Processed notes should be Chinese-first bilingual: explain in Chinese, keep
+  important English terms, method names, metrics, and source excerpts.
 - Processed notes should teach, not only summarize.
 - Do not invent missing source details.
 

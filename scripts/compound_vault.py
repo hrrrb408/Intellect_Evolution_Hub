@@ -826,7 +826,7 @@ def paper_sidecar_text(path: Path, digest: str, extraction: dict[str, object] | 
     tool = str(extraction.get("tool", ""))
     extracted = str(extraction.get("text", "")).strip()
     stderr = str(extraction.get("stderr", "")).strip()
-    extracted_section = extracted if extracted else "No usable text was extracted. If this is a scanned PDF, run OCR locally and update this section or the source-summary."
+    extracted_opening = compact_paragraph(extracted, max_chars=1400) if extracted else "No usable text was extracted. If this is a scanned PDF, run OCR locally and update the source-summary after OCR."
     diagnostics = f"- Extraction status: `{status}`\n- Extraction tool: `{tool or 'none'}`"
     if stderr:
         safe_stderr = stderr[:500].replace("`", "'")
@@ -834,19 +834,24 @@ def paper_sidecar_text(path: Path, digest: str, extraction: dict[str, object] | 
     return textwrap.dedent(f"""\
     # {path.stem}
 
-    ## Original PDF
+    ## PDF 来源记录 / PDF Source Note
+
+    这页故意保持轻量。IEH 将 PDF 原件保存在 `raw/papers/`，将学习脚手架保存在
+    `source-summaries/`；不会把完整 PDF 抽取文本重复写入 git-tracked markdown。
+
+    ## 原始 PDF / Original PDF
 
     - Path: `{path}`
     - Size bytes: {stat.st_size}
     - Hash: `{digest}`
 
-    ## Extraction Diagnostics
+    ## 抽取诊断 / Extraction Diagnostics
 
     {diagnostics}
 
-    ## Extracted Text
+    ## 原文开头摘录 / Extracted Opening
 
-    {extracted_section}
+    > {extracted_opening}
     """).strip()
 
 
@@ -1603,7 +1608,7 @@ def write_source_summary(
     source_entries = [source_rel]
     if original_rel:
         source_entries.insert(0, original_rel)
-    original_line = f"- Original file: `{original_rel}`" if original_rel else "- Original file: same as raw source note"
+    original_line = f"- 原始文件 / Original file: `{original_rel}`" if original_rel else "- 原始文件 / Original file: same as raw source note"
     lines = [
         "---",
         f"title: \"{safe_title(title).replace(chr(34), chr(39))}\"",
@@ -1619,62 +1624,69 @@ def write_source_summary(
         "---",
         "",
         "## For future Claude",
-        "This single-source summary was generated during IEH singularity-mode ingest. Treat it as a reading scaffold, then replace low-confidence bullets with human-checked synthesis after reading the raw source and original file.",
+        "这是一份 IEH 自动生成的单来源阅读脚手架。请用中文优先、英文术语保留的方式继续精读；所有算法细节必须回到 PDF 或原始来源核对。",
         "",
         f"# {safe_title(title)}",
         "",
-        "## Source Trail",
+        "## 来源轨迹 / Source Trail",
         "",
-        f"- Raw source note: {raw_link}",
-        f"- Raw source path: `{source_rel}`",
+        f"- 轻量 source note / Raw source note: {raw_link}",
+        f"- Source note path: `{source_rel}`",
         original_line,
         "",
-        "## Routing",
+        "## 路由 / Routing",
         "",
-        f"- Domain: `{domain}`",
-        f"- Subdomain: `{subdomain}`",
-        f"- Signal terms: {signal_line}",
+        f"- 领域 / Domain: `{domain}`",
+        f"- 子领域 / Subdomain: `{subdomain}`",
+        f"- 关键词信号 / Signal terms: {signal_line}",
         "",
-        "## Auto Reading Card",
+        "## 中文精读摘要 / Chinese-first Reading Notes",
         "",
-        "### Abstract / 摘要",
+        "- 核心问题：待精读后补充。/ Core problem: TBD after close reading.",
+        "- 方法抓手：待精读后补充，保留关键英文术语。/ Method handle: TBD, keep key English terms.",
+        "- 证据与实验：待精读后补充数据集、指标和主要结果。/ Evidence: TBD with datasets, metrics, and results.",
+        "- 与当前知识库的关系：待链接到 concepts、queries 和 mocs。/ Vault connection: link to concepts, queries, and MOCs.",
         "",
-        str(reading.get("abstract") or "Not detected. Fill this after reading the source."),
+        "## 自动阅读卡 / Auto Reading Card",
         "",
-        "### Method / 方法",
+        "### 摘要 / Abstract",
         "",
-        str(reading.get("method") or "Not detected. Fill this after reading the source."),
+        str(reading.get("abstract") or "未自动识别摘要。精读后用中文补充，并保留关键英文术语。"),
         "",
-        "### Results / Evidence",
+        "### 方法 / Method",
         "",
-        str(reading.get("results") or "Not detected. Fill this after reading the source."),
+        str(reading.get("method") or "未自动识别方法。精读后补充 problem setting、method、assumption 和 training/inference flow。"),
         "",
-        "### Conclusion / Takeaway",
+        "### 结果与证据 / Results and Evidence",
         "",
-        str(reading.get("conclusion") or "Not detected. Fill this after reading the source."),
+        str(reading.get("results") or "未自动识别结果。精读后补充实验设置、指标、数据集和主要结论。"),
         "",
-        "### Section Map",
+        "### 结论与启发 / Conclusion and Takeaway",
+        "",
+        str(reading.get("conclusion") or "未自动识别结论。精读后补充这篇材料对当前知识库的意义。"),
+        "",
+        "### 章节地图 / Section Map",
         "",
         *section_lines,
         "",
-        "## Initial Reading Judgment",
+        "## 初步阅读判断 / Initial Reading Judgment",
         "",
-        "- What problem does this source address?",
-        "- What claims, definitions, methods, or entities should become durable pages?",
-        "- What should be linked into the relevant MOC or query page?",
-        "- Is this source primarily raw material, a paper, a transcript, a study note, or a decision artifact?",
+        "- 这篇材料解决什么问题？/ What problem does this source address?",
+        "- 哪些 claim、definition、method、entity 应该沉淀为 durable pages？",
+        "- 应该链接到哪个 MOC 或 query page？",
+        "- 这份 source 更像论文、综述、技术方案、项目记录，还是决策材料？",
         "",
-        "## Extracted Opening",
+        "## 原文开头摘录 / Extracted Opening",
         "",
         excerpt,
         "",
-        "## Follow-up",
+        "## 后续动作 / Follow-up",
         "",
-        "- [ ] Confirm the title and source identity.",
-        "- [ ] Write a concise Chinese-first summary.",
-        "- [ ] Extract reusable concepts and entities.",
-        "- [ ] Create a query page if the source is part of a learning or research direction.",
-        "- [ ] Add this source to the relevant query page and MOC.",
+        "- [ ] 确认标题、作者、年份和 source identity。",
+        "- [ ] 写一版中文优先的精读摘要，英文术语保留括注。",
+        "- [ ] 抽取可复用 concepts/entities。",
+        "- [ ] 如果它属于学习路径或研究方向，创建或更新 query page。",
+        "- [ ] 把该 source 接入相关 MOC。",
     ]
     body = "\n".join(lines).rstrip() + "\n"
     write_text(path, body)
@@ -1682,12 +1694,16 @@ def write_source_summary(
 
 
 def ensure_scaffold(vault: Path) -> None:
-    dirs = [
-        "wiki", "wiki/sources", "wiki/entities", "wiki/concepts", "wiki/projects",
-        "wiki/decisions", "wiki/questions", "wiki/meta", "wiki/inbox", "wiki/notes",
-        "wiki/sessions", "wiki/resources", "wiki/resources/incoming",
-        "wiki/resources/people", "wiki/resources/concepts", "wiki/resources/questions",
-        "wiki/resources/research", ".vault-meta",
+    dirs = ["wiki", "wiki/meta", ".vault-meta"]
+    if not is_singularity_mode(vault):
+        dirs += [
+            "wiki/sources", "wiki/entities", "wiki/concepts", "wiki/projects",
+            "wiki/decisions", "wiki/questions", "wiki/inbox", "wiki/notes",
+            "wiki/sessions", "wiki/resources", "wiki/resources/incoming",
+            "wiki/resources/people", "wiki/resources/concepts", "wiki/resources/questions",
+            "wiki/resources/research",
+        ]
+    dirs += [
         "raw/articles/engineering/ai-engineering", "raw/papers/engineering/ai-engineering",
         "raw/assets", "raw/transcripts",
         "source-summaries/engineering/ai-engineering",
@@ -1717,9 +1733,9 @@ def ensure_scaffold(vault: Path) -> None:
 
 
 def ensure_ieh_scaffold(vault: Path) -> None:
-    ensure_scaffold(vault)
     if not mode_path(vault).exists():
         set_mode(vault, "singularity")
+    ensure_scaffold(vault)
     mark_ieh_template(vault)
 
 
@@ -1909,6 +1925,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     original_rel = ""
     is_pdf_source = False
     pdf_extraction: dict[str, object] = {}
+    raw_source_note_text = ""
     route_rules, route_default = load_route_rules(vault)
     if source_kind == "url":
         raw, content_type = read_url(src)
@@ -1929,10 +1946,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             extraction_text = str(pdf_extraction.get("text", ""))
             domain, subdomain = infer_domain_subdomain(title_for_pdf, extraction_text, src, rules=route_rules, default=route_default)
             original_rel = copy_original_pdf(vault, p, domain, subdomain, title_for_pdf)
-            raw = paper_sidecar_text(p, digest, pdf_extraction)
+            raw_source_note_text = paper_sidecar_text(p, digest, pdf_extraction)
+            raw = extraction_text or raw_source_note_text
         else:
             raw = safe_read(p, limit_bytes=args.max_bytes)
     text = normalize_source_text(raw, src, content_type)
+    source_note_text = normalize_source_text(raw_source_note_text, src, content_type) if raw_source_note_text else text
     title = extract_title(Path(base + ".md"), text) or base
     domain, subdomain = infer_domain_subdomain(title, text, src, rules=route_rules, default=route_default) if is_singularity_mode(vault) else ("", "")
     if source_kind == "url" and is_pdf_source:
@@ -1953,14 +1972,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     ingested_at = now().strftime(DATETIME_FMT)
     if is_singularity_mode(vault):
         checklist = [
-            "- [ ] Confirm this belongs under the inferred domain/subdomain.",
-            "- [ ] If this is a PDF, verify the preserved original under `raw/papers/`.",
-            "- [ ] Complete the matching `source-summaries/` page.",
-            "- [ ] Extract entities into `entities/`.",
-            "- [ ] Extract concepts or comparisons into `concepts/` or `comparisons/`.",
-            "- [ ] Create or update a learning question in `queries/`.",
-            "- [ ] Update the relevant `mocs/` page.",
-            "- [ ] Flag contradictions or stale claims before applying proposals.",
+            "- [ ] 确认路由 domain/subdomain 是否正确。",
+            "- [ ] 如果这是 PDF，确认原件已保存在 `raw/papers/`。",
+            "- [ ] 完成对应 `source-summaries/` 阅读脚手架。",
+            "- [ ] 抽取 entities 到 `entities/`。",
+            "- [ ] 抽取 concepts/comparisons 到 `concepts/` 或 `comparisons/`。",
+            "- [ ] 如属于学习路径或研究方向，创建或更新 `queries/`。",
+            "- [ ] 更新相关 `mocs/`。",
+            "- [ ] 应用 proposals 前先标记 contradictions 或 stale claims。",
         ]
     else:
         checklist = [
@@ -1986,25 +2005,25 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "---",
         "",
         "## For future Claude",
-        f"This source note preserves raw material ingested from `{src}`. Extract durable entities, concepts, projects, decisions, and contradictions from it before relying on it as synthesized knowledge.",
+        f"这是一份轻量 source note，记录从 `{src}` ingest 的来源、路由和抽取诊断。IEH 的学习入口是对应 `source-summaries/`，不要把这页当作精读结论。",
         "",
         f"# {title}",
         "",
-        "## Source",
+        "## 来源 / Source",
         "",
-        f"- Original: {src}",
-        *( [f"- Preserved original: `{original_rel}`"] if original_rel else [] ),
-        *( [f"- Inferred route: `{domain}/{subdomain}`"] if is_singularity_mode(vault) else [] ),
+        f"- 原始来源 / Original: {src}",
+        *( [f"- 保存的 PDF 原件 / Preserved original: `{original_rel}`"] if original_rel else [] ),
+        *( [f"- 推断路由 / Inferred route: `{domain}/{subdomain}`"] if is_singularity_mode(vault) else [] ),
         f"- Ingested: {ingested_at}",
         f"- Hash: `{digest}`",
         "",
-        "## Future Claude extraction checklist",
+        "## 后续抽取清单 / Future Claude extraction checklist",
         "",
         *checklist,
         "",
-        "## Raw Content",
+        "## 轻量原始记录 / Compact Raw Record",
         "",
-        text,
+        source_note_text,
     ]).rstrip() + "\n"
     write_text(out, body)
     source_rel = rel(vault, out)
