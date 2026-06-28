@@ -2378,7 +2378,7 @@ def cmd_query(args: argparse.Namespace) -> int:
         "title: Last Compound Vault Query",
         "type: query-result",
         f"updated: {now().strftime(DATETIME_FMT)}",
-        f"query: \"{args.question.replace('"', "'")}\"",
+        f"query: \"{args.question.replace(chr(34), chr(39))}\"",
         "ai-first: true",
         "---",
         "",
