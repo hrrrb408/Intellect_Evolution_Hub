@@ -239,14 +239,42 @@ python3 -m pip install -e .
 - 仓库路径：`/path/to/obsidian-second-brain`
 - Vault 路径：`/path/to/IEH`
 
+推荐先从内置模板创建一个干净 IEH vault。这个模板和本项目实际使用的 compound/stage-model 结构一致，但不包含任何私人材料：
+
+```bash
+cd /path/to/obsidian-second-brain
+cp -R examples/ieh-vault-template "$OBSIDIAN_VAULT_PATH"
+```
+
+如果 `$OBSIDIAN_VAULT_PATH` 还没有设置，可以先设置：
+
 ```bash
 cd /path/to/obsidian-second-brain
 export OBSIDIAN_VAULT_PATH="/path/to/IEH"
+cp -R examples/ieh-vault-template "$OBSIDIAN_VAULT_PATH"
+```
 
+然后初始化 runtime：
+
+```bash
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" init
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" mode set singularity
+python3 scripts/install_desktop.py "$OBSIDIAN_VAULT_PATH" --json
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" health --json
+```
+
+之后再 ingest 第一份材料：
+
+```bash
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest /path/to/source.pdf
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" query "这篇材料的核心观点是什么？" --refresh
+```
+
+如果你不想复制模板，也可以直接对空目录初始化：
+
+```bash
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" init
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" mode set singularity
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" health --json
 ```
 
@@ -301,13 +329,22 @@ python3 -m pip install -e .
 
 ### 3. 创建或选择 Obsidian vault
 
-可以使用新 vault：
+推荐从 IEH 模板创建新 vault：
 
 ```bash
-mkdir -p ~/Obsidian/IEH
+export OBSIDIAN_VAULT_PATH="$HOME/Obsidian/IEH"
+cp -R examples/ieh-vault-template "$OBSIDIAN_VAULT_PATH"
 ```
 
-也可以使用已有 vault，但建议先备份。
+这个模板位于：
+
+```text
+examples/ieh-vault-template/
+```
+
+它包含 IEH 的 stage-model 目录、runtime 手册、路由表、Obsidian starter config 和 `.gitignore`，但不包含私人资料、PDF、generated chunks、`.codex/`、`.agents/` 或 `.git/`。
+
+也可以使用已有 vault，但建议先备份。对已有 vault 初始化时，runtime 会追加必要结构，但不会自动把旧 PARA/生活模板迁移成 IEH stage model。
 
 ### 4. 设置 vault 路径
 
@@ -326,6 +363,7 @@ echo 'export OBSIDIAN_VAULT_PATH="$HOME/Obsidian/IEH"' >> ~/.zshrc
 ```bash
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" init
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" mode set singularity
+python3 scripts/install_desktop.py "$OBSIDIAN_VAULT_PATH" --json
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" index
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" chunks
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" hot

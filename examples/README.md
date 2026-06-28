@@ -7,6 +7,7 @@ If you are evaluating the skill, browse the files here before installing. If you
 ## What's in here
 
 ```
+ieh-vault-template/                                      # Clean distributable IEH compound/stage-model vault template
 sample-vault/
 ├── _CLAUDE.md                                       # Vault operating manual (the file /obsidian-init writes)
 ├── Daily/2026-04-27.md                              # type: daily
@@ -37,7 +38,17 @@ Everything here is fictional. **Alex Rivera**, **Sam Patel**, **Tide**, **Curren
 
 ## How to use this for your own vault
 
-You don't copy this folder into your vault. The skill builds your vault for you when you run `/obsidian-init` and grows it through normal usage of the 45 commands. This folder exists only to show what the output looks like before you install.
+Use `ieh-vault-template/` if you want the full IEH compound/stage-model structure immediately:
+
+```
+cp -R examples/ieh-vault-template /path/to/NewVault
+python3 scripts/compound_vault.py --vault /path/to/NewVault init
+python3 scripts/compound_vault.py --vault /path/to/NewVault mode set singularity
+python3 scripts/install_desktop.py /path/to/NewVault --json
+python3 scripts/compound_vault.py --vault /path/to/NewVault health --json
+```
+
+Do not copy `sample-vault/` into your vault. It exists only to show small AI-first note examples before you install.
 
 If you want a clean starting point, run:
 

@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "default": {
+    "domain": "engineering",
+    "subdomain": "ai-engineering"
+  },
+  "rules": [
+    {
+      "domain": "engineering",
+      "subdomain": "ai-engineering",
+      "keywords": [
+        "ai",
+        "agent",
+        "clip",
+        "deep learning",
+        "distribution shift",
+        "embedding",
+        "foundation model",
+        "language model",
+        "llm",
+        "machine learning",
+        "rag",
+        "retrieval",
+        "test-time adaptation",
+        "transformer",
+        "vision"
+      ]
+    },
+    {
+      "domain": "engineering",
+      "subdomain": "python",
+      "keywords": [
+        "django",
+        "fastapi",
+        "flask",
+        "pydantic",
+        "python"
+      ]
+    },
+    {
+      "domain": "engineering",
+      "subdomain": "java",
+      "keywords": [
+        "java",
+        "jvm",
+        "maven",
+        "spring",
+        "spring boot"
+      ]
+    },
+    {
+      "domain": "engineering",
+      "subdomain": "computer-network",
+      "keywords": [
+        "dns",
+        "http",
+        "ip",
+        "network",
+        "routing",
+        "tcp"
+      ]
+    },
+    {
+      "domain": "business",
+      "subdomain": "strategy",
+      "keywords": [
+        "business",
+        "company",
+        "customer",
+        "market",
+        "product",
+        "strategy"
+      ]
+    },
+    {
+      "domain": "finance",
+      "subdomain": "markets",
+      "keywords": [
+        "asset",
+        "finance",
+        "market",
+        "portfolio",
+        "stock",
+        "trading",
+        "volatility"
+      ]
+    },
+    {
+      "domain": "medicine",
+      "subdomain": "psychiatry",
+      "keywords": [
+        "adhd",
+        "clinical",
+        "depression",
+        "diagnosis",
+        "psychiatry"
+      ]
+    },
+    {
+      "domain": "science",
+      "subdomain": "cognitive-science",
+      "keywords": [
+        "attention",
+        "cognitive",
+        "memory",
+        "perception"
+      ]
+    },
+    {
+      "domain": "life",
+      "subdomain": "career",
+      "keywords": [
+        "career",
+        "decision",
+        "goal",
+        "habit",
+        "learning",
+        "productivity"
+      ]
+    },
+    {
+      "domain": "exam-prep",
+      "subdomain": "general",
+      "keywords": [
+        "certificate",
+        "course",
+        "exam",
+        "interview",
+        "review"
+      ]
+    }
+  ]
+}
