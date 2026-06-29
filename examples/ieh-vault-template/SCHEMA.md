@@ -68,6 +68,11 @@ Domains express primary use case:
 - Put original PDFs under `raw/papers/<domain>/<subdomain>/`.
 - Put compact source notes under `raw/articles/<domain>/<subdomain>/`.
   For PDFs, do not duplicate the full extracted text into git-tracked markdown.
+- Put local Markdown/course-note images under the matching article folder,
+  for example `raw/articles/engineering/algorithms/assets/figures/...`, and
+  rewrite the note to reference `assets/figures/...`.
+- Use `raw/assets/` only for standalone screenshots, web captures, and loose
+  uploaded images that do not belong to one source note.
 - Put single-source summaries under
   `source-summaries/<domain>/<subdomain>/`.
 - Put reusable synthesis under `concepts/`, `entities/`, `comparisons/`,

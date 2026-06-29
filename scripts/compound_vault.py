@@ -65,6 +65,9 @@ IEH_TEMPLATE_VERSION = 1
 WIKILINK_RE = re.compile(r"\[\[([^\[\]\|#\r\n]+)(?:#[^\[\]\|\r\n]+)?(?:\|[^\[\]\r\n]+)?\]\]")
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 WORD_RE = re.compile(r"[A-Za-z0-9_\-]+|[\u4e00-\u9fff]")
+MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]\n]*)\]\(([^)\n]+)\)")
+OBSIDIAN_IMAGE_RE = re.compile(r"!\[\[([^\]\n]+\.(?:png|jpe?g|gif|webp|svg))(?:\|[^\]\n]+)?\]\]", re.I)
+LOCAL_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
 
 def now() -> dt.datetime:
@@ -941,17 +944,20 @@ def write_stub(vault: Path, note_type: str, title: str, source_rel: str, reason:
     ---
 
     ## For future Claude
-    This is a low-confidence {note_type} stub created during deterministic Compound Vault ingest. Expand it after reading {source_link} and replace guesses with sourced claims.
+    这是 deterministic Compound Vault ingest 自动创建的低置信度 {note_type} 草稿。后续必须阅读 {source_link}，把猜测改成有来源支撑的判断。
+
+    Low-confidence {note_type} stub created during deterministic ingest. Expand it after reading {source_link} and replace guesses with sourced claims.
 
     # {safe_title(title)}
 
-    ## Notes
+    ## 中文说明 / Chinese Notes
 
-    - Created from {source_link}.
-    - Target layer: `{directory_hint}`.
-    - Reason: {reason}
+    - 来源 / Created from: {source_link}
+    - 目标层 / Target layer: `{directory_hint}`
+    - 生成原因 / Reason: {reason}
+    - 下一步 / Next step: 用中文优先补充定义、用途、边界、例子，并保留必要英文术语。
 
-    ## Sources
+    ## 来源 / Sources
 
     - {source_link}
     """)
@@ -1916,6 +1922,88 @@ def normalize_source_text(raw: str, source: str, content_type: str = "") -> str:
     return text.strip()
 
 
+def local_asset_ref(ref: str) -> str:
+    ref = ref.strip()
+    if ref.startswith("<") and ref.endswith(">"):
+        ref = ref[1:-1].strip()
+    ref = ref.split("#", 1)[0].split("?", 1)[0].strip()
+    return urllib.parse.unquote(ref)
+
+
+def is_local_image_ref(ref: str) -> bool:
+    raw_ref = local_asset_ref(ref)
+    parsed = urllib.parse.urlparse(raw_ref)
+    if parsed.scheme and parsed.scheme not in {"file"}:
+        return False
+    return Path(parsed.path if parsed.scheme == "file" else raw_ref).suffix.lower() in LOCAL_IMAGE_EXTS
+
+
+def migrate_local_markdown_assets(
+    vault: Path,
+    source_file: Path | None,
+    text: str,
+    raw_note_path: Path,
+    domain: str,
+    subdomain: str,
+) -> tuple[str, list[str]]:
+    """Copy images referenced by a local markdown source beside its raw article note."""
+    if not source_file or source_file.suffix.lower() == ".pdf" or not text:
+        return text, []
+    source_dir = source_file.parent
+    if not source_dir.exists():
+        return text, []
+
+    asset_root = vault / "raw" / "articles" / domain / subdomain / "assets"
+    note_dir = raw_note_path.parent
+    copied: list[str] = []
+    seen_targets: set[str] = set()
+
+    def copy_asset(ref: str) -> str | None:
+        if not is_local_image_ref(ref):
+            return None
+        clean_ref = local_asset_ref(ref)
+        parsed = urllib.parse.urlparse(clean_ref)
+        if parsed.scheme == "file":
+            source_asset = Path(parsed.path).expanduser().resolve()
+            target_rel = Path(source_asset.name)
+        else:
+            ref_path = Path(clean_ref)
+            source_asset = ref_path.expanduser().resolve() if ref_path.is_absolute() else (source_dir / ref_path).resolve()
+            target_rel = Path(source_asset.name) if ref_path.is_absolute() else Path(*[part for part in ref_path.parts if part not in {"", "."}])
+        if not source_asset.exists() or not source_asset.is_file():
+            return None
+        if ".." in target_rel.parts:
+            target_rel = Path(source_asset.name)
+        target = asset_root / target_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or file_hash(target) != file_hash(source_asset):
+            shutil.copy2(source_asset, target)
+        target_vault_rel = rel(vault, target)
+        if target_vault_rel not in seen_targets:
+            copied.append(target_vault_rel)
+            seen_targets.add(target_vault_rel)
+        return os.path.relpath(target, note_dir).replace(os.sep, "/")
+
+    def replace_markdown(match: re.Match[str]) -> str:
+        alt = match.group(1)
+        ref = match.group(2).strip()
+        if re.search(r"\s+['\"][^'\"]+['\"]\s*$", ref):
+            ref_only = re.split(r"\s+['\"][^'\"]+['\"]\s*$", ref, maxsplit=1)[0]
+        else:
+            ref_only = ref
+        migrated = copy_asset(ref_only)
+        return f"![{alt}]({migrated})" if migrated else match.group(0)
+
+    def replace_obsidian(match: re.Match[str]) -> str:
+        ref = match.group(1).strip()
+        migrated = copy_asset(ref)
+        return f"![[{migrated}]]" if migrated else match.group(0)
+
+    text = MARKDOWN_IMAGE_RE.sub(replace_markdown, text)
+    text = OBSIDIAN_IMAGE_RE.sub(replace_obsidian, text)
+    return text, copied
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     vault = resolve_vault(args.vault)
     ensure_scaffold(vault)
@@ -1926,6 +2014,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     is_pdf_source = False
     pdf_extraction: dict[str, object] = {}
     raw_source_note_text = ""
+    source_file_path: Path | None = None
     route_rules, route_default = load_route_rules(vault)
     if source_kind == "url":
         raw, content_type = read_url(src)
@@ -1936,6 +2025,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         if not p.exists():
             print(f"Source not found: {p}", file=sys.stderr)
             return 2
+        source_file_path = p
         base = slugify(p.stem)
         is_pdf_source = p.suffix.lower() == ".pdf"
         if is_pdf_source:
@@ -1969,6 +2059,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 0
     routed = route_path(vault, "source", f"{today()}-{base}-{digest[:8]}", domain=domain or None, subdomain=subdomain or None)
     out = vault / routed
+    migrated_assets: list[str] = []
+    if is_singularity_mode(vault) and source_kind == "file" and not is_pdf_source:
+        asset_domain = domain or "engineering"
+        asset_subdomain = subdomain or "ai-engineering"
+        source_note_text, migrated_assets = migrate_local_markdown_assets(
+            vault,
+            source_file_path,
+            source_note_text,
+            out,
+            asset_domain,
+            asset_subdomain,
+        )
+        text = source_note_text
     ingested_at = now().strftime(DATETIME_FMT)
     if is_singularity_mode(vault):
         checklist = [
@@ -2048,6 +2151,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "distributed": distributed,
         "rewrite_plan": rewrite_plan,
         "analysis": analysis.get("paths", {}) if isinstance(analysis, dict) else {},
+        "assets": migrated_assets,
     }
     save_manifest(vault, manifest)
     build_index(vault)

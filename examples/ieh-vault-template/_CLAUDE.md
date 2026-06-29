@@ -113,6 +113,11 @@ writing stage-model notes:
 python3 scripts/compound_vault.py --vault /path/to/vault ingest /path/to/source.pdf
 ```
 
+For local Markdown/course notes with images, keep the images beside the routed
+raw article note: `raw/articles/<domain>/<subdomain>/assets/...`. The global
+`raw/assets/` folder is only for standalone screenshots, web captures, and loose
+uploaded images.
+
 If a runtime already created stage files without manifest provenance, run:
 
 ```bash

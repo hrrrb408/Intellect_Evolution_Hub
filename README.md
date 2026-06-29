@@ -146,7 +146,9 @@ IEH/
 |-- HERMES.md
 |-- raw/
 |   |-- articles/<domain>/<subdomain>/
+|   |   `-- assets/            # 本地笔记随附图片，跟随 article 路由
 |   `-- papers/<domain>/<subdomain>/
+|-- raw/assets/                # 独立截图、网页截图、零散上传素材
 |-- source-summaries/<domain>/<subdomain>/
 |-- concepts/<domain>/<subdomain>/
 |-- entities/<domain>/<subdomain>/
@@ -173,6 +175,8 @@ IEH/
 目录说明：
 
 - `raw/` 保存原始材料的可追溯副本。PDF 原件放在 `raw/papers/`；`raw/articles/` 只保存轻量 source note、抽取诊断和开头摘录，不再重复保存完整 PDF 文本。
+- 本地 Markdown/课程笔记随附图片必须跟随路由进入同级 article assets，例如算法笔记进入 `raw/articles/engineering/algorithms/assets/figures/...`，正文链接改为 `assets/figures/...`。
+- `raw/assets/` 只放独立截图、网页截图、临时上传素材；不要把某篇本地笔记的配图放到这里。
 - `source-summaries/` 是单 source 阅读脚手架，用于保留摘要、贡献、方法、证据和后续链接。IEH 默认生成中文优先、英文术语保留的双语结构。
 - `concepts/` 是可复用概念，不等同于单篇论文标题页。
 - `entities/` 是人物、机构、工具、论文、数据集等稳定对象。

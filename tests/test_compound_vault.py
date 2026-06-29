@@ -518,6 +518,36 @@ def test_ingest_strips_nul_bytes_from_markdown_outputs():
         assert "\x00" not in summary.read_text(encoding="utf-8")
 
 
+def test_markdown_ingest_copies_local_images_to_article_assets():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td) / "vault"
+        source_dir = Path(td) / "course"
+        figure = source_dir / "figures/chapter1/overview.png"
+        figure.parent.mkdir(parents=True, exist_ok=True)
+        figure.write_bytes(b"fake-png")
+        source = source_dir / "algorithm-note.md"
+        source.write_text(
+            "# Algorithm Design Note\n\n"
+            "This algorithm design note studies dynamic programming and greedy algorithms.\n\n"
+            "![Overview](figures/chapter1/overview.png)\n",
+            encoding="utf-8",
+        )
+        run("--vault", str(vault), "init", "--template", "generic")
+        run("--vault", str(vault), "mode", "set", "singularity")
+        run("--vault", str(vault), "routes", "add", "engineering", "algorithms", "algorithm,dynamic programming,greedy")
+        run("--vault", str(vault), "ingest", str(source), "--no-distribute")
+
+        raw_note = next((vault / "raw/articles/engineering/algorithms").glob("*.md"))
+        asset = vault / "raw/articles/engineering/algorithms/assets/figures/chapter1/overview.png"
+        assert asset.exists()
+        assert "![Overview](assets/figures/chapter1/overview.png)" in raw_note.read_text(encoding="utf-8")
+        assert not (vault / "raw/assets/figures/chapter1/overview.png").exists()
+
+        manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+        item = next(iter(manifest["sources"].values()))
+        assert item["assets"] == ["raw/articles/engineering/algorithms/assets/figures/chapter1/overview.png"]
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)
