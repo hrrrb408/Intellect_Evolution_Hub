@@ -82,6 +82,8 @@ as durable knowledge folders.
 - If a user-facing note contains English, provide the Chinese counterpart:
   headings use `中文 / English`, terms use `中文（English）`, and full English
   sentences need a nearby Chinese explanation.
+- Never use placeholder phrases such as `中文对应`, `待补译`, or
+  `以下英文保留为原始表述` as if they were translations.
 - Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` may
   stay machine-friendly.
 - Never invent missing source details.

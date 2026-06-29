@@ -26,6 +26,7 @@ Required style:
 - Headings use `中文 / English`.
 - Technical terms use `中文（English）`.
 - Full English sentences need a nearby Chinese explanation.
+- Never use placeholder text such as `中文对应`, `待补译`, or `以下英文保留为原始表述` as a substitute for a real Chinese translation.
 - Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` are not the user's main reading surface and may remain machine-friendly.
 
 Default mode is dry-run. Use `--apply` only after reviewing the reported files.

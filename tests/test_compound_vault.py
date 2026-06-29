@@ -572,6 +572,49 @@ def test_ieh_bilingual_style_gate_for_user_facing_notes():
         assert "Bilingual Style Issues" in report
 
 
+def test_ieh_bilingual_style_rejects_fake_placeholder_translation():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init", "--template", "ieh")
+        bad = vault / "queries/engineering/ai-engineering/fake-bilingual.md"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text(
+            "---\ntitle: Fake Bilingual\ntype: query\nai-first: true\n---\n\n"
+            "## For future Claude\nUse this page for regression testing.\n\n"
+            "# 中文对应 / Fake Bilingual\n\n"
+            "This English sentence was not translated.\n"
+            "中文对应：以下英文保留为原始表述；精读时应改写为具体中文判断。\n",
+            encoding="utf-8",
+        )
+
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        item = next(item for item in health["bilingual_style_issues"] if item["path"] == "queries/engineering/ai-engineering/fake-bilingual.md")
+        texts = [line["text"] for line in item["lines"]]
+        assert any("中文对应" in text for text in texts)
+        assert any("以下英文保留为原始表述" in text for text in texts)
+
+
+def test_bilingualize_does_not_fabricate_placeholder_translation():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init", "--template", "ieh")
+        note = vault / "queries/engineering/ai-engineering/english-heading.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(
+            "---\ntitle: English Heading\ntype: query\nai-first: true\n---\n\n"
+            "## For future Claude\nUse this page for regression testing.\n\n"
+            "# Short Answer\n\n"
+            "This full English sentence still needs a real Chinese translation.\n",
+            encoding="utf-8",
+        )
+
+        run("--vault", str(vault), "bilingualize", "--apply")
+        text = note.read_text(encoding="utf-8")
+        assert "# 简短答案 / Short Answer" in text
+        assert "中文对应" not in text
+        assert "以下英文保留为原始表述" not in text
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)

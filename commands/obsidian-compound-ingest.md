@@ -73,6 +73,9 @@ create or update must be Chinese-first bilingual. This applies to `index.md`,
 `log.md`, `source-summaries/`, `concepts/`, `entities/`, `comparisons/`,
 `queries/`, and `mocs/`. Use `中文 / English` headings, `中文（English）`
 terms, and add a nearby Chinese explanation for any full English sentence.
+Never use placeholder lines such as `中文对应`, `待补译`, or
+`以下英文保留为原始表述` as a fake translation; unresolved English must stay
+visible as a health/lint issue until a real Chinese counterpart is written.
 Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` may stay
 machine-friendly.
 

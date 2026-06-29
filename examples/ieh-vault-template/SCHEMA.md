@@ -93,6 +93,9 @@ Domains express primary use case:
   present.
 - English terms should have Chinese counterparts, usually
   `中文（English）`; full English sentences need a nearby Chinese explanation.
+- Placeholder phrases such as `中文对应`, `待补译`, or
+  `以下英文保留为原始表述` are not bilingual content. Do not write them into
+  user-facing notes.
 - Processed notes should explain in Chinese, while preserving important English
   method names, metrics, datasets, and source excerpts.
 - Processed notes should teach, not only summarize.

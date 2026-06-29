@@ -507,6 +507,9 @@ def bilingual_style_issues(vault: Path) -> list[dict[str, object]]:
                 continue
             if not stripped or stripped.startswith("---") or stripped.startswith("title:") or stripped.startswith("type:"):
                 continue
+            if "中文对应" in stripped or "以下英文保留为原始表述" in stripped:
+                issue_lines.append({"line": lineno, "text": stripped[:180]})
+                continue
             if stripped.startswith(("source:", "sources:", "-", "  -", "tags:", "domain:", "subdomain:", "date:", "updated:", "confidence:", "ai-first:")):
                 continue
             if stripped == "## For future Claude":
@@ -577,7 +580,7 @@ def chinese_heading_for(english_heading: str) -> str:
     clean = re.sub(r"^#+\s*", "", english_heading).strip()
     clean = re.sub(r"^\d+\.\s*", "", clean).strip()
     key = clean.lower()
-    return BILINGUAL_HEADING_MAP.get(key, "中文对应")
+    return BILINGUAL_HEADING_MAP.get(key, clean)
 
 
 def is_frontmatter_line(line: str) -> bool:
@@ -615,17 +618,19 @@ def bilingualize_user_note_text(text: str) -> tuple[str, int]:
         if in_code:
             out.append(line)
             continue
-            if stripped.startswith("#") and ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped):
-                if stripped == "## For future Claude":
-                    out.append(line)
-                    previous_nonempty = stripped
-                    continue
-                hashes = re.match(r"^(#+)\s*", line).group(1) if re.match(r"^(#+)\s*", line) else "#"
+        if stripped.startswith("#") and ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped):
+            if stripped == "## For future Claude":
+                out.append(line)
+                previous_nonempty = stripped
+                continue
+            hashes = re.match(r"^(#+)\s*", line).group(1) if re.match(r"^(#+)\s*", line) else "#"
             heading = re.sub(r"^#+\s*", "", stripped)
-            out.append(f"{hashes} {chinese_heading_for(heading)} / {heading}")
-            changed += 1
-            previous_nonempty = out[-1].strip()
-            continue
+            zh_heading = chinese_heading_for(heading)
+            if zh_heading != heading:
+                out.append(f"{hashes} {zh_heading} / {heading}")
+                changed += 1
+                previous_nonempty = out[-1].strip()
+                continue
         if ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped) and not is_frontmatter_line(line):
             next_nonempty = ""
             for rest in lines[idx + 1: idx + 4]:
@@ -633,11 +638,9 @@ def bilingualize_user_note_text(text: str) -> tuple[str, int]:
                     next_nonempty = rest.strip()
                     break
             if not (CHINESE_RE.search(previous_nonempty) or CHINESE_RE.search(next_nonempty)):
-                indent = line[:len(line) - len(line.lstrip())]
-                prefix = "- " if stripped.startswith("- ") else ""
-                content = stripped[2:].strip() if prefix else stripped
-                out.append(f"{indent}{prefix}中文对应：以下英文保留为原始表述；精读时应改写为具体中文判断。")
-                changed += 1
+                # Do not fabricate translations. Leave the English line in place
+                # and let the bilingual style gate report it for real translation.
+                pass
         out.append(line)
         if stripped:
             previous_nonempty = stripped
@@ -1786,7 +1789,7 @@ def bilingual_snippet(snippet: str, fallback_zh: str) -> str:
         return fallback_zh
     if CHINESE_RE.search(snippet):
         return snippet
-    return f"中文对应：待人工或后续 AI 精读后补译，当前仅保留英文原文作为证据摘录。\n\nEnglish excerpt: {snippet}"
+    return f"原文摘录 / English excerpt:\n\n> {snippet}"
 
 
 def write_source_summary(
