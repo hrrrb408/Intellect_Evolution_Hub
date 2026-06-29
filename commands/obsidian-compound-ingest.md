@@ -68,6 +68,14 @@ After ingestion, run the rewrite workflow. The script preserves the source,
 creates low-confidence stubs, and writes a deterministic rewrite plan. You must
 complete the synthesis step:
 
+For IEH/SINGULARITY stage-model vaults, every user-facing durable page you
+create or update must be Chinese-first bilingual. This applies to `index.md`,
+`log.md`, `source-summaries/`, `concepts/`, `entities/`, `comparisons/`,
+`queries/`, and `mocs/`. Use `中文 / English` headings, `中文（English）`
+terms, and add a nearby Chinese explanation for any full English sentence.
+Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` may stay
+machine-friendly.
+
 1. Read the source note completely.
 2. Read `wiki/meta/rewrite-plan-latest.md`.
 3. Read `wiki/meta/source-claims-latest.json` for extracted claims.

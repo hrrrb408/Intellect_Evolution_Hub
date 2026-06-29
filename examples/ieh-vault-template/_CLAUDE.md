@@ -76,6 +76,14 @@ as durable knowledge folders.
 - Every durable note needs `ai-first: true`.
 - Every durable note needs a `## For future Claude` section near the top.
 - Filenames should use stable English kebab-case slugs.
+- User-facing durable notes must be Chinese-first bilingual. This applies to
+  `index.md`, `log.md`, `source-summaries/`, `concepts/`, `entities/`,
+  `comparisons/`, `queries/`, and `mocs/`.
+- If a user-facing note contains English, provide the Chinese counterpart:
+  headings use `中文 / English`, terms use `中文（English）`, and full English
+  sentences need a nearby Chinese explanation.
+- Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` may
+  stay machine-friendly.
 - Never invent missing source details.
 - Never pretend a PDF was read if extraction failed.
 - Never turn a single source claim into domain consensus without saying it is

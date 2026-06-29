@@ -548,6 +548,30 @@ def test_markdown_ingest_copies_local_images_to_article_assets():
         assert item["assets"] == ["raw/articles/engineering/algorithms/assets/figures/chapter1/overview.png"]
 
 
+def test_ieh_bilingual_style_gate_for_user_facing_notes():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init", "--template", "ieh")
+        index_text = (vault / "index.md").read_text(encoding="utf-8")
+        assert "# IEH 首页 / IEH Index" in index_text
+        assert "知识区域 / Knowledge Areas" in index_text
+
+        bad = vault / "concepts/engineering/ai-engineering/english-only.md"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text(
+            "---\ntitle: English Only\ntype: concept\nai-first: true\n---\n\n"
+            "## For future Claude\nEnglish-only user-facing note.\n\n"
+            "# English Only Concept\n\n"
+            "This paragraph has no nearby Chinese counterpart and should be reported.\n",
+            encoding="utf-8",
+        )
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        paths = [item["path"] for item in health["bilingual_style_issues"]]
+        assert "concepts/engineering/ai-engineering/english-only.md" in paths
+        report = (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
+        assert "Bilingual Style Issues" in report
+
+
 def test_nested_git_repositories_are_not_vault_notes():
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td)

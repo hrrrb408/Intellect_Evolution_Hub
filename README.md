@@ -191,6 +191,28 @@ IEH/
 - `wiki/meta/` 放系统生成的 report、proposal 和 draft。
 - `.vault-meta/` 放机器索引、manifest、route table、mode 和 chunks。
 
+### 用户阅读区双语规范
+
+以下路径是用户主要阅读区，必须中文优先双语：
+
+- `index.md`
+- `log.md`
+- `source-summaries/`
+- `concepts/`
+- `entities/`
+- `comparisons/`
+- `queries/`
+- `mocs/`
+
+规则：
+
+- 标题和章节标题使用 `中文 / English`。
+- 英文术语使用 `中文（English）`，例如 `状态转移（state transition）`。
+- 如果出现完整英文句子，附近必须有中文对应解释。
+- 中文解释是主内容，英文只保留术语、方法名、指标、数据集、原文证据或检索关键词。
+- `wiki/`、`.vault-meta/`、`.codex/`、`.agents/` 是 runtime 层，可以保持机器友好，不作为用户主要阅读区。
+- `health --json` 会报告用户阅读区中的英文-only标题或英文-only长行，作为双语质量门。
+
 ## 安装前准备
 
 ### 必需工具

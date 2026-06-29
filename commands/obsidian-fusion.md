@@ -23,6 +23,17 @@ drafts and appends MOC links. It does not overwrite existing durable notes.
 With `--apply --upgrade-scaffolds`, it may replace existing low-confidence fusion
 scaffolds. Human-written notes are still preserved.
 
+## IEH bilingual rule
+
+For IEH/SINGULARITY stage-model vaults, created or upgraded user-facing pages
+must be Chinese-first bilingual. This applies to `source-summaries/`,
+`concepts/`, `entities/`, `comparisons/`, `queries/`, and `mocs/`.
+
+- Headings use `中文 / English`.
+- Technical terms use `中文（English）`.
+- Full English sentences need a nearby Chinese explanation.
+- Runtime reports under `wiki/meta/` may remain machine-friendly.
+
 ## Procedure
 
 ```bash

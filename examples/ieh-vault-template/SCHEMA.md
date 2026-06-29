@@ -86,10 +86,19 @@ Domains express primary use case:
 - Every durable note needs a `## For future Claude` section.
 - Filenames use stable English kebab-case slugs.
 - Raw material may keep original language.
-- Processed notes should be Chinese-first bilingual: explain in Chinese, keep
-  important English terms, method names, metrics, and source excerpts.
+- User-facing durable notes must be Chinese-first bilingual. This applies to
+  `index.md`, `log.md`, `source-summaries/`, `concepts/`, `entities/`,
+  `comparisons/`, `queries/`, and `mocs/`.
+- Use `中文 / English` for titles and section headings whenever English is
+  present.
+- English terms should have Chinese counterparts, usually
+  `中文（English）`; full English sentences need a nearby Chinese explanation.
+- Processed notes should explain in Chinese, while preserving important English
+  method names, metrics, datasets, and source excerpts.
 - Processed notes should teach, not only summarize.
 - Do not invent missing source details.
+- Runtime files under `wiki/`, `.vault-meta/`, `.codex/`, and `.agents/` may
+  remain machine-friendly and are not the user's main reading surface.
 
 ## Query page standard
 

@@ -465,6 +465,197 @@ def duplicate_raw_pdfs(vault: Path) -> list[dict[str, object]]:
 
 
 PROCESSED_STAGE_ROOTS = {"concepts", "entities", "queries", "mocs", "comparisons"}
+USER_FACING_ROOTS = {"source-summaries", "concepts", "entities", "queries", "mocs", "comparisons"}
+USER_FACING_TOP_LEVEL = {"index.md", "log.md"}
+ENGLISH_RE = re.compile(r"[A-Za-z]")
+CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def is_user_facing_note(path: str) -> bool:
+    parts = Path(path).parts
+    if path in USER_FACING_TOP_LEVEL:
+        return True
+    return bool(parts and parts[0] in USER_FACING_ROOTS)
+
+
+def bilingual_style_issues(vault: Path) -> list[dict[str, object]]:
+    if not is_singularity_mode(vault):
+        return []
+    issues: list[dict[str, object]] = []
+    for note in sorted(iter_markdown(vault, include_generated=False)):
+        note_rel = rel(vault, note)
+        if not is_user_facing_note(note_rel):
+            continue
+        text = safe_read(note)
+        issue_lines: list[dict[str, object]] = []
+        lines = text.splitlines()
+        in_frontmatter = False
+        in_code = False
+        for lineno, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if lineno == 1 and stripped == "---":
+                in_frontmatter = True
+                continue
+            if in_frontmatter:
+                if stripped == "---":
+                    in_frontmatter = False
+                continue
+            if stripped.startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                continue
+            if not stripped or stripped.startswith("---") or stripped.startswith("title:") or stripped.startswith("type:"):
+                continue
+            if stripped.startswith(("source:", "sources:", "-", "  -", "tags:", "domain:", "subdomain:", "date:", "updated:", "confidence:", "ai-first:")):
+                continue
+            if stripped == "## For future Claude":
+                continue
+            if "`" in stripped and stripped.count("`") >= 2:
+                continue
+            if ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped):
+                if stripped.startswith("#"):
+                    issue_lines.append({"line": lineno, "text": stripped[:180]})
+                elif len(stripped) > 24:
+                    neighbors = []
+                    for idx in range(max(0, lineno - 3), min(len(lines), lineno + 2)):
+                        if idx != lineno - 1 and lines[idx].strip():
+                            neighbors.append(lines[idx])
+                    if not any(CHINESE_RE.search(item) for item in neighbors):
+                        issue_lines.append({"line": lineno, "text": stripped[:180]})
+            if len(issue_lines) >= 8:
+                break
+        if issue_lines:
+            issues.append({"path": note_rel, "lines": issue_lines})
+    return issues
+
+
+BILINGUAL_HEADING_MAP = {
+    "start here": "开始入口",
+    "runtime manuals": "运行手册",
+    "knowledge areas": "知识区域",
+    "next actions": "下一步",
+    "active research maps": "活跃研究地图",
+    "log": "日志",
+    "source trail": "来源轨迹",
+    "checked reading summary": "已核对阅读摘要",
+    "core learning judgment": "核心学习判断",
+    "concepts to retain": "需要保留的概念",
+    "vault connections": "知识库连接",
+    "how to use this chapter": "如何使用本章",
+    "follow-up checks": "后续检查",
+    "core judgment": "核心判断",
+    "short judgment": "简短判断",
+    "working definition": "工作定义",
+    "recognition pattern": "识别模式",
+    "practical use": "实践用途",
+    "source anchors": "来源锚点",
+    "related pages": "相关页面",
+    "short answer": "简短答案",
+    "learning order": "学习顺序",
+    "core concepts": "核心概念",
+    "common confusions": "常见混淆",
+    "self-check": "自测",
+    "mastery criteria": "掌握标准",
+    "entry points": "入口",
+    "learning spine": "学习主线",
+    "paradigm selection map": "范式选择地图",
+    "source chapters": "来源章节",
+    "active query": "活跃问题",
+    "the four layers": "四层结构",
+    "api comparison": "API 对比",
+    "project overview": "项目概览",
+    "key findings": "关键发现",
+    "source": "来源",
+    "sources": "来源",
+    "evidence": "证据",
+    "scope": "范围",
+}
+
+
+def chinese_heading_for(english_heading: str) -> str:
+    clean = re.sub(r"^#+\s*", "", english_heading).strip()
+    clean = re.sub(r"^\d+\.\s*", "", clean).strip()
+    key = clean.lower()
+    return BILINGUAL_HEADING_MAP.get(key, "中文对应")
+
+
+def is_frontmatter_line(line: str) -> bool:
+    stripped = line.strip()
+    return (
+        not stripped
+        or stripped == "---"
+        or re.match(r"^[A-Za-z0-9_-]+:\s*", stripped) is not None
+        or stripped.startswith("  - ")
+    )
+
+
+def bilingualize_user_note_text(text: str) -> tuple[str, int]:
+    lines = text.splitlines()
+    out: list[str] = []
+    changed = 0
+    in_frontmatter = False
+    in_code = False
+    previous_nonempty = ""
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if idx == 0 and stripped == "---":
+            in_frontmatter = True
+            out.append(line)
+            continue
+        if in_frontmatter:
+            out.append(line)
+            if stripped == "---":
+                in_frontmatter = False
+            continue
+        if stripped.startswith("```"):
+            in_code = not in_code
+            out.append(line)
+            continue
+        if in_code:
+            out.append(line)
+            continue
+            if stripped.startswith("#") and ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped):
+                if stripped == "## For future Claude":
+                    out.append(line)
+                    previous_nonempty = stripped
+                    continue
+                hashes = re.match(r"^(#+)\s*", line).group(1) if re.match(r"^(#+)\s*", line) else "#"
+            heading = re.sub(r"^#+\s*", "", stripped)
+            out.append(f"{hashes} {chinese_heading_for(heading)} / {heading}")
+            changed += 1
+            previous_nonempty = out[-1].strip()
+            continue
+        if ENGLISH_RE.search(stripped) and not CHINESE_RE.search(stripped) and not is_frontmatter_line(line):
+            next_nonempty = ""
+            for rest in lines[idx + 1: idx + 4]:
+                if rest.strip():
+                    next_nonempty = rest.strip()
+                    break
+            if not (CHINESE_RE.search(previous_nonempty) or CHINESE_RE.search(next_nonempty)):
+                indent = line[:len(line) - len(line.lstrip())]
+                prefix = "- " if stripped.startswith("- ") else ""
+                content = stripped[2:].strip() if prefix else stripped
+                out.append(f"{indent}{prefix}中文对应：以下英文保留为原始表述；精读时应改写为具体中文判断。")
+                changed += 1
+        out.append(line)
+        if stripped:
+            previous_nonempty = stripped
+    return "\n".join(out).rstrip() + "\n", changed
+
+
+def bilingualize_user_facing_notes(vault: Path) -> dict[str, object]:
+    changed_files: list[dict[str, object]] = []
+    for note in sorted(iter_markdown(vault, include_generated=False)):
+        note_rel = rel(vault, note)
+        if not is_user_facing_note(note_rel):
+            continue
+        old = safe_read(note)
+        new, changed = bilingualize_user_note_text(old)
+        if changed and new != old:
+            write_text(note, new)
+            changed_files.append({"path": note_rel, "changes": changed})
+    return {"changed_files": changed_files, "changed_count": len(changed_files)}
 
 
 def flat_processed_stage_pages(vault: Path) -> list[str]:
@@ -1589,6 +1780,15 @@ def build_reading_card(text: str) -> dict[str, object]:
     }
 
 
+def bilingual_snippet(snippet: str, fallback_zh: str) -> str:
+    snippet = snippet.strip()
+    if not snippet:
+        return fallback_zh
+    if CHINESE_RE.search(snippet):
+        return snippet
+    return f"中文对应：待人工或后续 AI 精读后补译，当前仅保留英文原文作为证据摘录。\n\nEnglish excerpt: {snippet}"
+
+
 def write_source_summary(
     vault: Path,
     source_rel: str,
@@ -1631,8 +1831,9 @@ def write_source_summary(
         "",
         "## For future Claude",
         "这是一份 IEH 自动生成的单来源阅读脚手架。请用中文优先、英文术语保留的方式继续精读；所有算法细节必须回到 PDF 或原始来源核对。",
+        "This is an IEH auto-generated single-source reading scaffold. Keep it Chinese-first, preserve necessary English terms, and verify technical details against the original source.",
         "",
-        f"# {safe_title(title)}",
+        f"# {safe_title(title)} / {safe_title(title)}",
         "",
         "## 来源轨迹 / Source Trail",
         "",
@@ -1651,25 +1852,25 @@ def write_source_summary(
         "- 核心问题：待精读后补充。/ Core problem: TBD after close reading.",
         "- 方法抓手：待精读后补充，保留关键英文术语。/ Method handle: TBD, keep key English terms.",
         "- 证据与实验：待精读后补充数据集、指标和主要结果。/ Evidence: TBD with datasets, metrics, and results.",
-        "- 与当前知识库的关系：待链接到 concepts、queries 和 mocs。/ Vault connection: link to concepts, queries, and MOCs.",
+        "- 与当前知识库的关系：待链接到概念页、问题页和地图页。/ Vault connection: link to concepts, queries, and MOCs.",
         "",
         "## 自动阅读卡 / Auto Reading Card",
         "",
         "### 摘要 / Abstract",
         "",
-        str(reading.get("abstract") or "未自动识别摘要。精读后用中文补充，并保留关键英文术语。"),
+        bilingual_snippet(str(reading.get("abstract") or ""), "未自动识别摘要。精读后用中文补充，并保留关键英文术语。"),
         "",
         "### 方法 / Method",
         "",
-        str(reading.get("method") or "未自动识别方法。精读后补充 problem setting、method、assumption 和 training/inference flow。"),
+        bilingual_snippet(str(reading.get("method") or ""), "未自动识别方法。精读后补充问题设定（problem setting）、方法（method）、假设（assumption）和训练/推理流程（training/inference flow）。"),
         "",
         "### 结果与证据 / Results and Evidence",
         "",
-        str(reading.get("results") or "未自动识别结果。精读后补充实验设置、指标、数据集和主要结论。"),
+        bilingual_snippet(str(reading.get("results") or ""), "未自动识别结果。精读后补充实验设置、指标、数据集和主要结论。"),
         "",
         "### 结论与启发 / Conclusion and Takeaway",
         "",
-        str(reading.get("conclusion") or "未自动识别结论。精读后补充这篇材料对当前知识库的意义。"),
+        bilingual_snippet(str(reading.get("conclusion") or ""), "未自动识别结论。精读后补充这篇材料对当前知识库的意义。"),
         "",
         "### 章节地图 / Section Map",
         "",
@@ -1678,8 +1879,8 @@ def write_source_summary(
         "## 初步阅读判断 / Initial Reading Judgment",
         "",
         "- 这篇材料解决什么问题？/ What problem does this source address?",
-        "- 哪些 claim、definition、method、entity 应该沉淀为 durable pages？",
-        "- 应该链接到哪个 MOC 或 query page？",
+        "- 哪些论断（claim）、定义（definition）、方法（method）、实体（entity）应该沉淀为长期页面（durable pages）？",
+        "- 应该链接到哪个地图页（MOC）或问题页（query page）？",
         "- 这份 source 更像论文、综述、技术方案、项目记录，还是决策材料？",
         "",
         "## 原文开头摘录 / Extracted Opening",
@@ -1743,6 +1944,65 @@ def ensure_ieh_scaffold(vault: Path) -> None:
         set_mode(vault, "singularity")
     ensure_scaffold(vault)
     mark_ieh_template(vault)
+    files = {
+        "index.md": """---
+title: IEH Index
+type: index
+ai-first: true
+sources: []
+---
+
+# IEH 首页 / IEH Index
+
+## For future Claude
+这是给用户看的知识库首页。所有用户阅读区必须中文优先、英文对应，不要把机器运行目录当成主要阅读入口。
+
+This is the human front door for the vault. Keep it short and link to durable entry points.
+
+## 开始入口 / Start Here
+
+- [[README]]
+- [[SCHEMA]]
+- [[CRITICAL_FACTS]]
+- [[SOUL]]
+- [[_CLAUDE]]
+- [[wiki/hot]]
+- [[wiki/index]]
+
+## 知识区域 / Knowledge Areas
+
+- 原始材料 / Raw sources: `raw/`
+- 单来源阅读卡 / Source summaries: `source-summaries/`
+- 概念与方法 / Concepts: `concepts/`
+- 实体对象 / Entities: `entities/`
+- 对比页 / Comparisons: `comparisons/`
+- 问题与学习路径 / Queries: `queries/`
+- 内容地图 / Maps of Content: `mocs/`
+- 维护文档 / Maintenance: `maintenance/`
+""",
+        "log.md": """---
+title: IEH Human Log
+type: log
+ai-first: true
+sources: []
+---
+
+# IEH 人类日志 / IEH Human Log
+
+## For future Claude
+这页给用户记录简短、可读的知识库操作历史。机器运行日志放在 `wiki/log.md`，不要混到这里。
+
+Use this page for short human-readable vault operation entries. Generated runtime logs belong in `wiki/log.md`.
+
+## 日志 / Log
+
+- 模板已初始化。/ Template initialized.
+""",
+    }
+    for r, content in files.items():
+        p = vault / r
+        if not p.exists():
+            write_text(p, content.rstrip() + "\n")
 
 
 def log_event(vault: Path, event: str, details: str = "") -> None:
@@ -2849,6 +3109,7 @@ def health_report(vault: Path) -> dict[str, object]:
     flat_processed_pages = flat_processed_stage_pages(vault)
     missing_distributed = manifest_missing_distributed(vault, manifest)
     missing_audit = missing_audit_artifacts(vault)
+    bilingual_issues = bilingual_style_issues(vault)
     git = git_status(vault)
     template = template_status(vault)
     for source_key, item in manifest.get("sources", {}).items():
@@ -2882,6 +3143,7 @@ def health_report(vault: Path) -> dict[str, object]:
         "flat_processed_stage_pages": flat_processed_pages,
         "manifest_missing_distributed": missing_distributed,
         "missing_audit_artifacts": missing_audit,
+        "bilingual_style_issues": bilingual_issues,
         "git": git,
         "template": template,
     }
@@ -2903,6 +3165,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     flat_processed_stage_pages = report.get("flat_processed_stage_pages", [])
     manifest_missing_distributed = report.get("manifest_missing_distributed", [])
     missing_audit_artifacts = report.get("missing_audit_artifacts", [])
+    bilingual_style_issues = report.get("bilingual_style_issues", [])
     git = report.get("git", {})
     template = report.get("template", {})
     lines = [
@@ -2937,6 +3200,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         f"- Flat processed stage pages: {len(flat_processed_stage_pages)}",
         f"- Manifest missing distributed links: {len(manifest_missing_distributed)}",
         f"- Missing audit artifacts: {len(missing_audit_artifacts)}",
+        f"- Bilingual style issues: {len(bilingual_style_issues)}",
         f"- Git repo: `{bool(git.get('is_repo'))}` dirty: `{git.get('dirty')}`",
         f"- IEH template: `{bool(template.get('is_ieh_template'))}` mode: `{template.get('mode')}` missing dirs: `{len(template.get('missing_required_dirs', []))}`",
         f"- Generated staleness hours: `{json.dumps(report['generated_staleness_hours'], ensure_ascii=False)}`",
@@ -2999,6 +3263,14 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         lines.append("None.")
     lines += ["", "## Missing Audit Artifacts", ""]
     lines += [f"- `{x}`" for x in missing_audit_artifacts] or ["None."]
+    lines += ["", "## Bilingual Style Issues", ""]
+    if bilingual_style_issues:
+        for item in bilingual_style_issues[:100]:
+            lines.append(f"- `{item['path']}`")
+            for issue in item.get("lines", [])[:8]:
+                lines.append(f"  - line {issue['line']}: {issue['text']}")
+    else:
+        lines.append("None.")
     lines += ["", "## Git Status", ""]
     if git.get("is_repo"):
         lines.append(f"- Repo: true; dirty: `{git.get('dirty')}`")
@@ -3231,7 +3503,12 @@ def fusion_signal_line(signals: Sequence[str]) -> str:
 
 def fusion_section_lines(reading: dict[str, object]) -> list[str]:
     sections = [str(item) for item in reading.get("sections", []) if str(item).strip()]
-    return [f"- {section}" for section in sections[:10]] or ["- 暂未识别出稳定章节；先按摘要、方法、证据、结论四步阅读。"]
+    return [f"- 章节 / Section: {section}" for section in sections[:10]] or ["- 暂未识别出稳定章节；先按摘要、方法、证据、结论四步阅读。"]
+
+
+def bilingual_title(title: str) -> str:
+    title = safe_title(title)
+    return title if CHINESE_RE.search(title) else f"{title} / {title}"
 
 
 def build_fusion_page_body(
@@ -3283,47 +3560,48 @@ def build_fusion_page_body(
             "---",
             "",
             "## For future Claude",
-            "This source-summary draft was generated by the Compound Vault fusion workflow. Verify source identity before promoting it to a durable synthesis.",
+            "这是一份由融合流程自动生成的单来源阅读草稿。提升为长期知识前，必须核对来源身份，并补齐中文解释。",
+            "This source-summary draft was generated by the Compound Vault fusion workflow. Verify source identity before promoting it to durable synthesis.",
             "",
-            f"# {source_title}",
+            f"# {bilingual_title(source_title)}",
             "",
-            "## Source Trail",
+            "## 来源轨迹 / Source Trail",
             "",
             f"- Raw source note: {source_link}",
             f"- Raw source path: `{source_rel}`",
             "",
-            "## Reading Card / 阅读卡片",
+            "## 阅读卡片 / Reading Card",
             "",
             "### Abstract / 摘要",
             "",
-            str(reading.get("abstract") or "未自动识别摘要。先读源材料开头和结论，再补一段中文摘要。"),
+            bilingual_snippet(str(reading.get("abstract") or ""), "未自动识别摘要。先读源材料开头和结论，再补一段中文摘要。"),
             "",
             "### Method / 方法",
             "",
-            str(reading.get("method") or "未自动识别方法。补充它如何得到结论、使用什么数据/流程/论证。"),
+            bilingual_snippet(str(reading.get("method") or ""), "未自动识别方法。补充它如何得到结论、使用什么数据/流程/论证。"),
             "",
             "### Results / Evidence / 证据",
             "",
-            str(reading.get("results") or "未自动识别结果。把最重要的事实、实验、论证或例子写到这里。"),
+            bilingual_snippet(str(reading.get("results") or ""), "未自动识别结果。把最重要的事实、实验、论证或例子写到这里。"),
             "",
             "### Conclusion / Takeaway / 结论",
             "",
-            str(reading.get("conclusion") or "未自动识别结论。补充这篇材料对当前知识库的主要影响。"),
+            bilingual_snippet(str(reading.get("conclusion") or ""), "未自动识别结论。补充这篇材料对当前知识库的主要影响。"),
             "",
-            "### Section Map",
+            "### 章节地图 / Section Map",
             "",
             *fusion_section_lines(reading),
             "",
-            "## Evidence Claims",
+            "## 证据论断 / Evidence Claims",
             "",
             *fusion_claim_lines(claims, source_rel),
             "",
-            "## Next Processing",
+            "## 后续处理 / Next Processing",
             "",
-            "- [ ] 将可复用概念沉淀到 concepts/。",
-            "- [ ] 将人物、机构、工具或论文对象沉淀到 entities/。",
-            "- [ ] 将学习路线和判断沉淀到 queries/。",
-            "- [ ] 将稳定链接加入对应 MOC。",
+            "- [ ] 将可复用概念沉淀到概念页（concepts/）。",
+            "- [ ] 将人物、机构、工具或论文对象沉淀到实体页（entities/）。",
+            "- [ ] 将学习路线和判断沉淀到问题页（queries/）。",
+            "- [ ] 将稳定链接加入对应地图页（MOC）。",
         ]
     elif action == "ensure_concept":
         lines = [
@@ -3331,13 +3609,14 @@ def build_fusion_page_body(
             "type: concept",
             *common_frontmatter[2:],
             "## For future Claude",
-            "This concept draft was generated by the Compound Vault fusion workflow. Keep the Chinese explanation, but replace low-confidence text with checked synthesis after reading the source.",
+            "这是融合流程自动生成的概念草稿。必须保留中文优先解释，并在读完来源后用可靠综合替换低置信度文本。",
+            "This concept draft was generated by the Compound Vault fusion workflow. Keep Chinese-first explanation and replace low-confidence text with checked synthesis after reading the source.",
             "",
-            f"# {title}",
+            f"# {bilingual_title(title)}",
             "",
             "## 核心理解 / Core Understanding",
             "",
-            f"- `{title}` 是从 {source_link} 中抽出的可复用概念。当前最可靠的线索是：{fusion_signal_line(signals)}。",
+            f"- `{title}` 是从 {source_link} 中抽出的可复用概念。当前最可靠的线索（signal terms）是：{fusion_signal_line(signals)}。",
             f"- 先把它理解为 `{source_title}` 中需要反复使用的知识单元，而不是只属于单篇材料的摘录。",
             "",
             "## 为什么重要 / Why It Matters",
@@ -3370,9 +3649,10 @@ def build_fusion_page_body(
             "type: entity",
             *common_frontmatter[2:],
             "## For future Claude",
+            "这是融合流程自动生成的实体草稿。依赖它之前，必须确认身份、角色和别名。",
             "This entity draft was generated by the Compound Vault fusion workflow. Confirm identity, role, and aliases before relying on it.",
             "",
-            f"# {title}",
+            f"# {bilingual_title(title)}",
             "",
             "## 身份与角色 / Identity",
             "",
@@ -3384,15 +3664,15 @@ def build_fusion_page_body(
             f"- 它与 `{source_title}` 的关系需要人工确认。",
             f"- 信号词：{fusion_signal_line(signals)}。",
             "",
-            "## Evidence",
+            "## 证据 / Evidence",
             "",
             *fusion_claim_lines(claims, source_rel, limit=3),
             "",
-            "## Aliases / 待确认别名",
+            "## 待确认别名 / Aliases",
             "",
-            "- TODO: add aliases only after confirming the raw source.",
+            "- 待办：只有确认原始来源后才添加别名。/ TODO: add aliases only after confirming the raw source.",
             "",
-            "## Sources",
+            "## 来源 / Sources",
             "",
             f"- {source_link}",
         ]
@@ -3402,9 +3682,10 @@ def build_fusion_page_body(
             "type: question",
             *common_frontmatter[2:],
             "## For future Claude",
+            "这是融合流程自动生成的问题页草稿。它必须成为学习指南：先给判断，再给阅读顺序、混淆点和掌握检查。",
             "This query draft was generated by the Compound Vault fusion workflow. Make it a learning guide: judgment first, then reading order, confusions, and mastery checks.",
             "",
-            f"# {title}",
+            f"# {bilingual_title(title)}",
             "",
             "## 当前短答案 / Short Answer",
             "",
@@ -3420,7 +3701,7 @@ def build_fusion_page_body(
             "",
             "## 核心概念 / Core Concepts",
             "",
-            f"- Signal terms: {fusion_signal_line(signals)}",
+            f"- 信号词 / Signal terms: {fusion_signal_line(signals)}",
             "",
             "## 容易混淆 / Common Confusions",
             "",
@@ -3455,22 +3736,23 @@ def build_fusion_page_body(
             "---",
             "",
             "## For future Claude",
+            "这是融合流程自动生成的地图页草稿。它只负责导航；详细综合应写入概念页或问题页。",
             "This MOC draft was generated by the Compound Vault fusion workflow. Keep it navigational; detailed synthesis belongs in concept/query pages.",
             "",
-            f"# {title}",
+            f"# {bilingual_title(title)}",
             "",
-            "## Current Questions",
+            "## 当前问题 / Current Questions",
             "",
-            "## Concepts",
+            "## 概念 / Concepts",
             "",
-            "## Entities",
+            "## 实体 / Entities",
             "",
-            "## Source Summaries",
+            "## 来源摘要 / Source Summaries",
             "",
-            "## Maintenance Notes",
+            "## 维护备注 / Maintenance Notes",
             "",
-            f"- Domain route: `{domain}/{subdomain}`",
-            f"- Latest source considered: {source_link}",
+            f"- 领域路由 / Domain route: `{domain}/{subdomain}`",
+            f"- 最近纳入的来源 / Latest source considered: {source_link}",
         ]
     else:
         return ""
@@ -3887,6 +4169,24 @@ def cmd_log(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bilingualize(args: argparse.Namespace) -> int:
+    vault = resolve_vault(args.vault)
+    ensure_scaffold(vault)
+    if args.apply:
+        result = bilingualize_user_facing_notes(vault)
+        build_index(vault)
+        build_chunk_index(vault)
+        update_hot(vault)
+        log_event(vault, "compound-bilingualize", f"changed={result['changed_count']}")
+    else:
+        result = {
+            "dry_run": True,
+            "issues": bilingual_style_issues(vault),
+        }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Compound Vault helper for obsidian-second-brain")
     p.add_argument("--vault", help="Obsidian vault path. Defaults to OBSIDIAN_VAULT_PATH or cwd.")
@@ -3943,6 +4243,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.add_argument("--fix-index", action="store_true", help="Rebuild generated index/hot after reporting")
     sp.set_defaults(func=cmd_health)
+
+    sp = sub.add_parser("bilingualize", help="Dry-run or apply Chinese-first bilingual normalization for user-facing IEH notes")
+    sp.add_argument("--apply", action="store_true", help="Rewrite user-facing notes. Default is dry-run/audit only.")
+    sp.set_defaults(func=cmd_bilingualize)
 
     sp = sub.add_parser("chunks", help="Rebuild .vault-meta/chunks and .vault-meta/bm25/index.json")
     sp.add_argument("--json", action="store_true")

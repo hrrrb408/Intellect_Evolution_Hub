@@ -79,7 +79,7 @@ _category_title() {
     thinking) echo "Thinking - synthesis, decisions, learning, reviews" ;;
     research) echo "Research - bring external sources into the vault" ;;
     meta)     echo "Meta - vault setup, health, structure" ;;
-    *)        echo "${1^}" ;;
+    *)        printf '%s%s\n' "$(printf '%.1s' "$1" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$1" | cut -c2-)" ;;
   esac
 }
 
