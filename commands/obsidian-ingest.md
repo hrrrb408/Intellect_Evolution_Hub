@@ -54,7 +54,7 @@ The argument is a URL, file path, or pasted text. If no argument, ask what to in
    - Chat screenshots - extract messages, people, decisions
    Save the image description to `raw/articles/` as a markdown summary with context.
 
-   **For articles** - use WebFetch to pull the page content
+   **For articles / webpage URLs** - use WebFetch to pull the page content. In IEH/SINGULARITY vaults, save the URL source as one `raw/links/<domain>/<subdomain>/...md` file containing link metadata, fetch status, diagnostics, and extracted content. Do not duplicate the extracted body into `raw/articles/`.
    **For PDFs** - read the file directly
    **For pasted text** - use as-is
 
@@ -66,7 +66,8 @@ The argument is a URL, file path, or pasted text. If no argument, ask what to in
    - **Quotes**: notable quotes worth preserving
 
 5. Save the raw source to `raw/` (immutable - never modify after saving):
-   - Create `raw/articles/YYYY-MM-DD — Source Title.md` (or transcripts/, pdfs/, videos/)
+   - For URL/webpage/WeChat sources, create `raw/links/YYYY-MM-DD — Source Title.md` with extracted content in the same file.
+   - For local article/text files, create `raw/articles/YYYY-MM-DD — Source Title.md` (or transcripts/, pdfs/, videos/)
    - Frontmatter: `date`, `tags: [source, <type>]`, `source_url`, `source_type`, `content_hash`
 
 6. **REWRITE the vault** - this is the critical step. Don't just create new pages. Rewrite existing ones.

@@ -15,6 +15,7 @@ Default mode is a dry-run. It reports stage sources under:
 
 - `raw/papers/`
 - `raw/articles/`
+- `raw/links/`
 - `source-summaries/`
 
 that are not represented in the Compound Vault manifest.

@@ -425,6 +425,29 @@ def discover_stage_source_records(vault: Path) -> list[dict[str, object]]:
                 "subdomain": subdomain,
             })
 
+    raw_links = vault / "raw/links"
+    if raw_links.exists():
+        for link_note in sorted(raw_links.rglob("*.md")):
+            link_rel = rel(vault, link_note)
+            if link_rel in seen_notes:
+                continue
+            summary_rel = summary_by_source.get(link_rel, "")
+            domain, subdomain = infer_domain_subdomain_from_rel(link_rel)
+            fm = extract_frontmatter(safe_read(link_note))
+            source_url = fm.get("url") or fm.get("source") or link_rel
+            records.append({
+                "source_key": f"url:{source_url}" if re.match(r"https?://", str(source_url)) else f"vault:{link_rel}",
+                "source": source_url,
+                "source_kind": "url" if re.match(r"https?://", str(source_url)) else "vault-file",
+                "source_format": "link",
+                "content_hash": path_content_hash(link_note),
+                "source_note": link_rel,
+                "source_summary": summary_rel,
+                "original_file": "",
+                "domain": domain,
+                "subdomain": subdomain,
+            })
+
     return records
 
 
@@ -788,6 +811,7 @@ def template_status(vault: Path) -> dict[str, object]:
     is_ieh = isinstance(payload, dict) and payload.get("template") == "ieh"
     required_dirs = [
         "raw/articles/engineering/ai-engineering",
+        "raw/links/engineering/ai-engineering",
         "raw/papers/engineering/ai-engineering",
         "source-summaries/engineering/ai-engineering",
         "concepts/engineering/ai-engineering",
@@ -823,6 +847,7 @@ def mark_ieh_template(vault: Path, source: str = "compound-init") -> None:
         "required_mode": "singularity",
         "stage_roots": [
             "raw/articles/{domain}/{subdomain}",
+            "raw/links/{domain}/{subdomain}",
             "raw/papers/{domain}/{subdomain}",
             "source-summaries/{domain}/{subdomain}",
             "concepts/{domain}/{subdomain}",
@@ -1083,6 +1108,7 @@ def route_path(vault: Path, note_type: str, title: str, domain: str | None = Non
         subdomain = slugify(subdomain or infer_domain_subdomain(title)[1])
         mapping = {
             "source": f"raw/articles/{domain}/{subdomain}/{slug}.md",
+            "source-link": f"raw/links/{domain}/{subdomain}/{slug}.md",
             "entity": f"entities/{domain}/{subdomain}/{slug}.md",
             "concept": f"concepts/{domain}/{subdomain}/{slug}.md",
             "project": f"concepts/{domain}/{subdomain}/{slug}.md",
@@ -1676,7 +1702,7 @@ def analyze_note(vault: Path, path: Path) -> NoteInfo:
 
 def infer_note_type(vault: Path, path: Path) -> str:
     r = rel(vault, path)
-    if r.startswith("raw/articles/") or r.startswith("raw/papers/") or r.startswith("raw/transcripts/"):
+    if r.startswith("raw/articles/") or r.startswith("raw/links/") or r.startswith("raw/papers/") or r.startswith("raw/transcripts/"):
         return "source"
     if r.startswith("source-summaries/"):
         return "source-summary"
@@ -1915,7 +1941,7 @@ def ensure_scaffold(vault: Path) -> None:
         ]
     dirs += [
         "raw/articles/engineering/ai-engineering", "raw/papers/engineering/ai-engineering",
-        "raw/assets", "raw/transcripts",
+        "raw/links/engineering/ai-engineering", "raw/assets", "raw/transcripts",
         "source-summaries/engineering/ai-engineering",
         "concepts/engineering/ai-engineering",
         "comparisons/engineering/ai-engineering",
@@ -2185,6 +2211,23 @@ def normalize_source_text(raw: str, source: str, content_type: str = "") -> str:
     return text.strip()
 
 
+def link_platform(url: str) -> str:
+    host = urllib.parse.urlparse(url).netloc.lower()
+    if "mp.weixin.qq.com" in host:
+        return "wechat"
+    if "youtube.com" in host or "youtu.be" in host:
+        return "youtube"
+    if "bilibili.com" in host:
+        return "bilibili"
+    if "zhihu.com" in host:
+        return "zhihu"
+    if "xiaohongshu.com" in host:
+        return "xiaohongshu"
+    if "weibo.com" in host:
+        return "weibo"
+    return host or "web"
+
+
 def local_asset_ref(ref: str) -> str:
     ref = ref.strip()
     if ref.startswith("<") and ref.endswith(">"):
@@ -2278,9 +2321,18 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     pdf_extraction: dict[str, object] = {}
     raw_source_note_text = ""
     source_file_path: Path | None = None
+    fetch_status = "not-applicable"
+    fetch_error = ""
     route_rules, route_default = load_route_rules(vault)
     if source_kind == "url":
-        raw, content_type = read_url(src)
+        fetch_status = "fetched"
+        try:
+            raw, content_type = read_url(src, max_bytes=args.max_bytes)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            raw = ""
+            content_type = ""
+            fetch_status = "blocked"
+            fetch_error = f"{type(exc).__name__}: {exc}"
         base = slugify(src)
         is_pdf_source = "pdf" in content_type.lower() or urllib.parse.urlparse(src).path.lower().endswith(".pdf")
     else:
@@ -2303,7 +2355,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             raw = extraction_text or raw_source_note_text
         else:
             raw = safe_read(p, limit_bytes=args.max_bytes)
-    text = normalize_source_text(raw, src, content_type)
+    if source_kind == "url" and not raw:
+        text = f"# {src}\n\nFetch status: {fetch_status}\n\nFetch error: {fetch_error}\n"
+    else:
+        text = normalize_source_text(raw, src, content_type)
     source_note_text = normalize_source_text(raw_source_note_text, src, content_type) if raw_source_note_text else text
     title = extract_title(Path(base + ".md"), text) or base
     domain, subdomain = infer_domain_subdomain(title, text, src, rules=route_rules, default=route_default) if is_singularity_mode(vault) else ("", "")
@@ -2320,7 +2375,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print(f"Already ingested unchanged source: {existing.get('source_note')}")
         print("Use --force to re-ingest.")
         return 0
-    routed = route_path(vault, "source", f"{today()}-{base}-{digest[:8]}", domain=domain or None, subdomain=subdomain or None)
+    route_type = "source-link" if source_kind == "url" and is_singularity_mode(vault) else "source"
+    routed = route_path(vault, route_type, f"{today()}-{base}-{digest[:8]}", domain=domain or None, subdomain=subdomain or None)
     out = vault / routed
     migrated_assets: list[str] = []
     if is_singularity_mode(vault) and source_kind == "file" and not is_pdf_source:
@@ -2357,12 +2413,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     body = "\n".join([
         "---",
         f'title: "{title.replace(chr(34), chr(39))}"',
-        "type: source",
+        f"type: {'raw-link' if source_kind == 'url' and is_singularity_mode(vault) else 'source'}",
         f"date: {today()}",
         *( [f"domain: {domain}", f"subdomain: {subdomain}"] if is_singularity_mode(vault) else [] ),
+        *( [f'url: "{src.replace(chr(34), chr(39))}"', f"platform: {link_platform(src)}", f"fetch_status: {fetch_status}"] if source_kind == "url" and is_singularity_mode(vault) else [] ),
+        *( [f'fetch_error: "{fetch_error.replace(chr(34), chr(39))}"'] if fetch_error and source_kind == "url" and is_singularity_mode(vault) else [] ),
         f'source: "{src.replace(chr(34), chr(39))}"',
         f"source_kind: {source_kind}",
-        f"source_format: {'pdf' if is_pdf_source else 'text'}",
+        f"source_format: {'link' if source_kind == 'url' and not is_pdf_source else 'pdf' if is_pdf_source else 'text'}",
         *( [f"original_file: {original_rel}"] if original_rel else [] ),
         f"ingested: {ingested_at}",
         f"content_hash: {digest}",
@@ -2371,10 +2429,33 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "---",
         "",
         "## For future Claude",
-        f"这是一份轻量 source note，记录从 `{src}` ingest 的来源、路由和抽取诊断。IEH 的学习入口是对应 `source-summaries/`，不要把这页当作精读结论。",
+        f"这是一份{'URL/link source record' if source_kind == 'url' and is_singularity_mode(vault) else '轻量 source note'}，记录从 `{src}` ingest 的来源、路由和抽取诊断。IEH 的学习入口是对应 `source-summaries/`，不要把这页当作精读结论。",
         "",
         f"# {title}",
         "",
+        *( [
+            "## 链接信息 / Link Metadata",
+            "",
+            f"- URL: {src}",
+            f"- 平台 / Platform: {link_platform(src)}",
+            f"- 抓取状态 / Fetch status: {fetch_status}",
+            *( [f"- 抓取错误 / Fetch error: `{fetch_error}`"] if fetch_error else [] ),
+            f"- 内容类型 / Content type: `{content_type or 'unknown'}`",
+            *( [f"- 推断路由 / Inferred route: `{domain}/{subdomain}`"] if is_singularity_mode(vault) else [] ),
+            f"- Ingested: {ingested_at}",
+            f"- Hash: `{digest}`",
+            "",
+            "## 抓取诊断 / Fetch Diagnostics",
+            "",
+            f"- status: `{fetch_status}`",
+            f"- method: `urllib.request`",
+            f"- max_bytes: `{args.max_bytes}`",
+            *( [f"- error: `{fetch_error}`"] if fetch_error else [] ),
+            "",
+            "## 抽取正文 / Extracted Content",
+            "",
+            source_note_text,
+        ] if source_kind == "url" and is_singularity_mode(vault) else [
         "## 来源 / Source",
         "",
         f"- 原始来源 / Original: {src}",
@@ -2390,6 +2471,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "## 轻量原始记录 / Compact Raw Record",
         "",
         source_note_text,
+        ] ),
     ]).rstrip() + "\n"
     write_text(out, body)
     source_rel = rel(vault, out)
@@ -2406,8 +2488,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         "ingested_at": now().strftime(DATETIME_FMT),
         "source_note": source_rel,
         "source_summary": summary_rel,
-        "source_format": "pdf" if is_pdf_source else "text",
+        "source_format": "link" if source_kind == "url" and not is_pdf_source else "pdf" if is_pdf_source else "text",
         "original_file": original_rel,
+        "fetch_status": fetch_status,
+        "fetch_error": fetch_error,
+        "platform": link_platform(src) if source_kind == "url" else "",
         "pdf_extraction": {k: v for k, v in pdf_extraction.items() if k != "text"},
         "domain": domain,
         "subdomain": subdomain,
@@ -4208,7 +4293,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=20)
     sp.set_defaults(func=cmd_hot)
 
-    sp = sub.add_parser("ingest", help="Ingest a local file or URL into wiki/sources")
+    sp = sub.add_parser("ingest", help="Ingest a local file or URL into the manifest-aware raw source layer")
     sp.add_argument("source")
     sp.add_argument("--max-bytes", type=int, default=2_000_000)
     sp.add_argument("--hot-limit", type=int, default=20)

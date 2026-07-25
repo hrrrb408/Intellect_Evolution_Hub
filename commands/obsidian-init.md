@@ -46,6 +46,7 @@ fi
    - `.vault-meta/ieh-template.json`
    - `.vault-meta/mode.json` with `mode: singularity`
    - `raw/articles/engineering/ai-engineering/`
+   - `raw/links/engineering/ai-engineering/`
    - `raw/papers/engineering/ai-engineering/`
    - `source-summaries/engineering/ai-engineering/`
    - `concepts/engineering/ai-engineering/`

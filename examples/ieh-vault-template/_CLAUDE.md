@@ -43,6 +43,9 @@ Use:
 - `raw/` for original material plus compact source notes. For PDFs, keep the
   original under `raw/papers/` and do not duplicate full extracted text into
   markdown.
+- `raw/links/` for URL, webpage, and WeChat public-account sources. The same
+  raw-link file stores URL metadata, fetch status, diagnostics, and extracted
+  content; do not split one URL source into `raw/links` plus `raw/articles`.
 - `source-summaries/` for Chinese-first bilingual one-source reading scaffolds.
 - `concepts/` for reusable ideas, methods, mechanisms, definitions.
 - `entities/` for people, labs, tools, papers, projects, datasets.

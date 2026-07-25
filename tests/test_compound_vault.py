@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +13,15 @@ SCRIPT = ROOT / "scripts" / "compound_vault.py"
 
 def run(*args, cwd=None):
     return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=cwd, text=True, capture_output=True, check=True)
+
+
+def load_compound_module():
+    spec = importlib.util.spec_from_file_location("compound_vault_test_module", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_init_ingest_query_health():
@@ -546,6 +557,66 @@ def test_markdown_ingest_copies_local_images_to_article_assets():
         manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
         item = next(iter(manifest["sources"].values()))
         assert item["assets"] == ["raw/articles/engineering/algorithms/assets/figures/chapter1/overview.png"]
+
+
+def test_url_ingest_writes_extracted_content_into_raw_links():
+    cv = load_compound_module()
+    original_read_url = cv.read_url
+    cv.read_url = lambda url, timeout=20, max_bytes=2_000_000: (
+        "<html><head><title>Daily Productivity Article</title></head>"
+        "<body><h1>Daily Productivity Article</h1>"
+        "<p>This article explains daily planning, review rituals, and attention management.</p>"
+        "</body></html>",
+        "text/html; charset=utf-8",
+    )
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td)
+            url = "https://example.com/daily-productivity"
+            cv.cmd_init(types.SimpleNamespace(vault=str(vault), template="generic", limit=20))
+            cv.set_mode(vault, "singularity")
+            cv.save_json(cv.route_rules_path(vault), {
+                "schema_version": 1,
+                "default": {"domain": "engineering", "subdomain": "ai-engineering"},
+                "rules": [
+                    {
+                        "domain": "life",
+                        "subdomain": "productivity",
+                        "keywords": ["productivity", "daily planning", "attention"],
+                    }
+                ],
+            })
+            rc = cv.cmd_ingest(types.SimpleNamespace(
+                vault=str(vault),
+                source=url,
+                max_bytes=2_000_000,
+                hot_limit=20,
+                force=False,
+                distribute=False,
+                rewrite_plan=True,
+                analyze_claims=True,
+            ))
+            assert rc == 0
+
+            link_notes = list((vault / "raw/links/life/productivity").glob("*.md"))
+            assert len(link_notes) == 1
+            link_text = link_notes[0].read_text(encoding="utf-8")
+            assert "type: raw-link" in link_text
+            assert "fetch_status: fetched" in link_text
+            assert "## 抽取正文 / Extracted Content" in link_text
+            assert "daily planning, review rituals, and attention management" in link_text
+            assert not list((vault / "raw/articles/life/productivity").glob("*.md"))
+
+            manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+            item = next(iter(manifest["sources"].values()))
+            assert item["source_kind"] == "url"
+            assert item["source_format"] == "link"
+            assert item["fetch_status"] == "fetched"
+            assert item["source_note"].startswith("raw/links/life/productivity/")
+            summary = vault / item["source_summary"]
+            assert f"  - {item['source_note']}" in summary.read_text(encoding="utf-8")
+    finally:
+        cv.read_url = original_read_url
 
 
 def test_ieh_bilingual_style_gate_for_user_facing_notes():

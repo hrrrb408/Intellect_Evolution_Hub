@@ -147,6 +147,8 @@ IEH/
 |-- raw/
 |   |-- articles/<domain>/<subdomain>/
 |   |   `-- assets/            # 本地笔记随附图片，跟随 article 路由
+|   |-- links/<domain>/<subdomain>/
+|   |   `-- *.md               # URL/网页/公众号 source：链接元数据 + 抽取正文
 |   `-- papers/<domain>/<subdomain>/
 |-- raw/assets/                # 独立截图、网页截图、零散上传素材
 |-- source-summaries/<domain>/<subdomain>/
@@ -174,7 +176,7 @@ IEH/
 
 目录说明：
 
-- `raw/` 保存原始材料的可追溯副本。PDF 原件放在 `raw/papers/`；`raw/articles/` 只保存轻量 source note、抽取诊断和开头摘录，不再重复保存完整 PDF 文本。
+- `raw/` 保存原始材料的可追溯副本。PDF 原件放在 `raw/papers/`；本地 Markdown/文本文章放在 `raw/articles/`；URL、网页、微信公众号等链接 source 放在 `raw/links/`，链接元数据、抓取状态和抽取正文都保存在同一个 link 文档里，不再跳转到 `raw/articles/`。
 - 本地 Markdown/课程笔记随附图片必须跟随路由进入同级 article assets，例如算法笔记进入 `raw/articles/engineering/algorithms/assets/figures/...`，正文链接改为 `assets/figures/...`。
 - `raw/assets/` 只放独立截图、网页截图、临时上传素材；不要把某篇本地笔记的配图放到这里。
 - `source-summaries/` 是单 source 阅读脚手架，用于保留摘要、贡献、方法、证据和后续链接。IEH 默认生成中文优先、英文术语保留的双语结构。
@@ -997,6 +999,16 @@ python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest https://
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest /path/to/article.md
 ```
 
+URL/link source 会写入 `raw/links/<domain>/<subdomain>/...md`。这个文件同时保存：
+
+- 原始 URL、平台、抓取状态和抓取错误。
+- 抽取正文。
+- 后续 source-summary、concept、query、MOC 的来源锚点。
+
+本地 Markdown、txt、HTML 等非 URL 文章仍写入 `raw/articles/`。这样微信公众号、网页文章这类来源不用在 `raw/links` 和 `raw/articles` 之间跳来跳去。
+
+如果网页或微信公众号抓取失败，ingest 仍会创建 `raw/links/...` link record，并把 `fetch_status` 标为 `blocked`，等待用户补正文、截图或手动复制文本。
+
 ### Manifest repair
 
 正常情况下，任何 PDF/附件 ingest 都应该先走 manifest-aware 入口：
@@ -1005,7 +1017,7 @@ python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest /path/to
 python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest /path/to/source.pdf
 ```
 
-如果某个 Desktop/agent 会话已经手工创建了 `raw/papers`、`raw/articles` 和 `source-summaries`，但没有写入 `.vault-meta/compound-manifest.json`，用 manifest repair 修复机器账本。
+如果某个 Desktop/agent 会话已经手工创建了 `raw/papers`、`raw/articles`、`raw/links` 和 `source-summaries`，但没有写入 `.vault-meta/compound-manifest.json`，用 manifest repair 修复机器账本。
 
 Dry-run：
 
@@ -1296,7 +1308,8 @@ raw/papers/**/*.pdf
 说明：
 
 - PDF 原件可能很大，不建议直接纳入 vault git。
-- `raw/articles/` 是轻量 source note，建议纳入版本管理。
+- `raw/articles/` 是本地文章/文本 source note，建议纳入版本管理。
+- `raw/links/` 是 URL、网页、微信公众号 source record，保存链接元数据、抓取状态和抽取正文，建议纳入版本管理。
 - `source-summaries/`、`concepts/`、`entities/`、`queries/`、`mocs/` 建议纳入版本管理。
 - `.vault-meta/compound-manifest.json` 建议纳入版本管理，因为它是 source 账本。
 - `.vault-meta/chunks/` 和 BM25 index 可再生成，通常不纳入 git。

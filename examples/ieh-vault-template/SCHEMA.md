@@ -68,6 +68,10 @@ Domains express primary use case:
 - Put original PDFs under `raw/papers/<domain>/<subdomain>/`.
 - Put compact source notes under `raw/articles/<domain>/<subdomain>/`.
   For PDFs, do not duplicate the full extracted text into git-tracked markdown.
+- Put URL, webpage, and WeChat public-account sources under
+  `raw/links/<domain>/<subdomain>/`. The link record itself stores URL
+  metadata, fetch status, diagnostics, and extracted content; do not create a
+  second `raw/articles/` copy for the same URL.
 - Put local Markdown/course-note images under the matching article folder,
   for example `raw/articles/engineering/algorithms/assets/figures/...`, and
   rewrite the note to reference `assets/figures/...`.

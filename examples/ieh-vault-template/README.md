@@ -48,8 +48,10 @@ Then open `/path/to/NewVault` in Obsidian.
 
 ## IEH conventions
 
-- PDF originals live in `raw/papers/`; `raw/articles/` keeps compact source
-  notes only, not full duplicated PDF text.
+- PDF originals live in `raw/papers/`; local article/text sources live in
+  `raw/articles/`; URL/webpage/WeChat sources live in `raw/links/` with link
+  metadata, fetch status, diagnostics, and extracted content in the same file.
+  Do not duplicate URL extracted text into `raw/articles/`.
 - Generated reading scaffolds are Chinese-first bilingual. Keep English method
   names, metrics, datasets, and source excerpts when they matter.
 - `wiki/` is runtime space only: `hot.md`, `index.md`, `log.md`, and `meta/`.

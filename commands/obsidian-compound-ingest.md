@@ -1,7 +1,7 @@
 ---
-description: Ingest a local file or URL into wiki/sources, then refresh hot/index/log.
+description: Ingest a local file or URL into the manifest-aware raw source layer, then refresh hot/index/log.
 category: research
-triggers_en: ["compound ingest", "ingest to compound vault", "add source to wiki sources", "compound vault ingest"]
+triggers_en: ["compound ingest", "ingest to compound vault", "add source to raw layer", "compound vault ingest"]
 argument-hint: "<file path or URL>"
 allowed-tools: Bash, Read, Grep, Glob
 ---
@@ -18,10 +18,14 @@ For any user request like "ingest this PDF", "ingest into IEH", "add these
 attachments", or "把这些材料喂进知识库", this command is the first step.
 
 Do **not** bypass it by manually writing `raw/papers/`, `raw/articles/`,
-`source-summaries/`, `concepts/`, `queries/`, or `mocs/` first. Manual
+`raw/links/`, `source-summaries/`, `concepts/`, `queries/`, or `mocs/` first. Manual
 stage-model synthesis is a follow-up step after the manifest-aware ingest has
 recorded source provenance, hashes, extraction diagnostics, claims,
 contradictions, and patch proposals.
+
+URL/webpage/WeChat sources must be preserved as `raw/links/<domain>/<subdomain>/...md`.
+The raw-link file itself stores URL metadata, fetch status, diagnostics, and the
+extracted body. Do not create a second `raw/articles/` copy for the same URL.
 
 If a previous runtime already created stage-model files without this entrypoint,
 run `/obsidian-manifest-repair` as a dry-run, then apply only after reviewing the
