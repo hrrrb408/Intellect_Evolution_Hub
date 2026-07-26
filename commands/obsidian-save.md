@@ -12,7 +12,7 @@ Use the obsidian-second-brain skill. Execute `/obsidian-save`:
 4. Spawn parallel subagents - one per group - so all note types are handled simultaneously:
    - **People agent**: search for each person, create or update notes, log interactions
    - **Projects agent**: search for each project, create or update notes
-   - **Tasks agent**: parse tasks, add to the right kanban columns
+   - **Tasks agent**: parse tasks and add them through `compound_vault.py task add` into `tasks/inbox.md`, `tasks/today.md`, `tasks/upcoming.md`, or `tasks/waiting.md`
    - **Decisions agent**: find relevant project notes, append to Key Decisions sections
    - **Ideas agent**: search Ideas/ for related notes, create or append
    - **Content agent** (if a `social-media/` folder exists in the vault): scan for content-worthy items and route them:
@@ -23,7 +23,7 @@ Use the obsidian-second-brain skill. Execute `/obsidian-save`:
 5. After all agents complete: update today's daily note with links to everything saved
 6. Report back: a clean list of what was saved and where
 
-Search before creating anything - duplicate notes are vault rot. Propagate every write to boards, daily note, and linked notes. Never create an orphaned note.
+Search before creating anything - duplicate notes are vault rot. Propagate task writes to `tasks/`, daily note, and linked notes. Never create an orphaned note.
 
 The content agent only runs if `social-media/` exists in the vault. If it doesn't exist, skip silently - don't create the folder unprompted.
 

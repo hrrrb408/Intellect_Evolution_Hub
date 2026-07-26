@@ -15,7 +15,7 @@ This command requires a Google Calendar MCP (the claude.ai connector exposes `mc
 2. **Pull the calendar** for the window: find the primary calendar, then list events with times.
 3. **Gather what the vault implies** for the same window - by listing and grepping, never from memory (see the anti-fabrication rule):
    - Active project `next_action`s and dated deadlines in project notes.
-   - Tasks/board items due in the window.
+   - `tasks/` items due in the window, using `compound_vault.py task list --status all --json`.
    - Commitments mentioned in recent daily notes and captures (appointments, calls, travel, filing deadlines, birthdays).
    - Fixed dates from `CRITICAL_FACTS.md` falling in the window.
 4. **Reconcile and report**, in two directions:

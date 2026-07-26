@@ -12,7 +12,7 @@ The argument is the period: `today`, `week`, or `month`. Default to `week` if no
 2. Determine the date range from the argument
 3. List all daily notes in the range with `list_files_in_dir("Daily/")`
 4. Spawn parallel subagents - one per daily note - to read and extract key points from each simultaneously
-5. Also spawn parallel agents to read dev logs and completed kanban tasks from the same period
+5. Also spawn parallel agents to read dev logs, `tasks/done.md`, and `wiki/meta/task-review-latest.md` from the same period
 6. Synthesize all agent results: what was worked on, decisions made, people interacted with, tasks completed, ideas captured
 7. Present as a clean narrative summary - not a raw dump of note content
 8. End the recap with a **Suggested questions for future-Claude** section: 4 to 5 questions this period's vault content is uniquely positioned to answer that the user has not asked yet. Each question must cite at least one specific note (with `[[wikilink]]`) so future-Claude can resolve it without re-scanning. Prefer questions that:

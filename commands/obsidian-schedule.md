@@ -16,8 +16,8 @@ Example: `/obsidian-schedule "Sync with Acme" 2026-06-02 14:00 60min`
 Use when the meeting has no corresponding vault task yet.
 
 **Mode B - From task**: `/obsidian-schedule task:<path-or-fuzzy-title> <when> [duration]`
-Example: `/obsidian-schedule task:wiki/tasks/2026-05-28-renew-aws-cert.md 2026-06-02 14:00 30min`
-Use when you want the calendar event tied to an existing task. `<path-or-fuzzy-title>` accepts either a direct path or a fuzzy task title that gets searched in `wiki/tasks/` and on kanban boards.
+Example: `/obsidian-schedule task:task-20260726-abc12345 2026-06-02 14:00 30min`
+Use when you want the calendar event tied to an existing task. `<path-or-fuzzy-title>` accepts a task id, a direct `tasks/*.md` path, or a fuzzy task title searched through `compound_vault.py task list --status all --json`.
 
 **Mode C - Suggest time**: `/obsidian-schedule task:<path-or-fuzzy-title> suggest:<window> [duration]`
 Example: `/obsidian-schedule task:onboarding-call suggest:next-week 45min`
@@ -30,9 +30,10 @@ Steps:
 2. Parse the arguments and classify into Mode A, B, or C. If the parse is ambiguous, ask the user one clarifying question. Do not guess.
 
 3. If Mode B or C, locate the task:
+   - If `task:` is a task id, locate it with `compound_vault.py task list --status all --json`.
    - If `task:` is a path, read it directly.
-   - If `task:` is a fuzzy title, search `wiki/tasks/` (or `Tasks/` per `_CLAUDE.md`) and kanban boards under `boards/` (or `Boards/`). Show what was found, confirm with the user before proceeding.
-   - Extract from the task's frontmatter and body: `title` (heading or `task-title:`), `description` (the body up to the first `##`), `participants` or `related-people` (list of `[[Person Name]]` wikilinks), `due` if present, `related-projects`.
+   - If `task:` is a fuzzy title, search the JSON task list. Show what was found and confirm with the user before proceeding.
+   - Extract from the task line: title, due, project, source, context, and any wikilinked people in the title/source.
 
 4. Resolve attendee emails:
    - For each `[[Person Name]]` participant, open `wiki/entities/Person Name.md` (or `People/`) and read the `email:` field from frontmatter.

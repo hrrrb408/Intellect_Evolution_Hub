@@ -711,6 +711,62 @@ def test_nested_git_repositories_are_not_vault_notes():
         assert all(hit["path"] != "nested-project/README.md" for hit in query)
 
 
+def test_ieh_task_workflow_and_health_gate():
+    with tempfile.TemporaryDirectory() as td:
+        vault = Path(td)
+        run("--vault", str(vault), "init", "--template", "ieh")
+        for path in [
+            "tasks/inbox.md",
+            "tasks/today.md",
+            "tasks/upcoming.md",
+            "tasks/waiting.md",
+            "tasks/done.md",
+            "tasks/contexts/computer.md",
+            "tasks/contexts/phone.md",
+            "tasks/contexts/errands.md",
+            "tasks/contexts/reading.md",
+        ]:
+            assert (vault / path).exists()
+
+        added = json.loads(run(
+            "--vault", str(vault),
+            "task", "add", "整理算法设计笔记 / Organize algorithm design notes",
+            "--file", "today",
+            "--priority", "high",
+            "--context", "reading",
+            "--due", "2026-07-30",
+            "--json",
+        ).stdout)
+        assert added["id"].startswith("task-")
+        assert "tasks/today.md" == added["path"]
+        today_text = (vault / "tasks/today.md").read_text(encoding="utf-8")
+        assert added["id"] in today_text
+        assert "priority:high" in today_text
+        assert "context:reading" in today_text
+
+        active = json.loads(run("--vault", str(vault), "task", "list", "--json").stdout)
+        assert any(item["id"] == added["id"] and item["status"] == "active" for item in active)
+        review = json.loads(run("--vault", str(vault), "task", "review", "--json").stdout)
+        assert review["active"] == 1
+        assert (vault / "wiki/meta/task-review-latest.md").exists()
+
+        done = json.loads(run("--vault", str(vault), "task", "done", added["id"], "--json").stdout)
+        assert done["status"] == "done"
+        assert added["id"] not in (vault / "tasks/today.md").read_text(encoding="utf-8")
+        done_text = (vault / "tasks/done.md").read_text(encoding="utf-8")
+        assert added["id"] in done_text
+        assert "completed:" in done_text
+
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert health["task_style_issues"] == []
+        assert "Task Style Issues" in (vault / "wiki/meta/lint-report-latest.md").read_text(encoding="utf-8")
+
+        inbox = vault / "tasks/inbox.md"
+        inbox.write_text(inbox.read_text(encoding="utf-8") + "- [ ] Bad task without metadata\n", encoding="utf-8")
+        health = json.loads(run("--vault", str(vault), "health", "--json").stdout)
+        assert any(item["path"] == "tasks/inbox.md" and "missing task metadata" in item["issue"] for item in health["task_style_issues"])
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

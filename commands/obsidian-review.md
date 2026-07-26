@@ -12,7 +12,7 @@ The optional argument specifies `weekly` or `monthly`. Ask if not clear from con
 2. Determine the period: weekly or monthly
 3. Read daily notes and dev logs for the period
 4. Read active projects and check for status changes
-5. Read completed tasks from kanban boards
+5. Read completed tasks from `tasks/done.md` and the generated `wiki/meta/task-review-latest.md` if it exists
 6. Draft a review note using `Templates/Review.md` if it exists, otherwise use:
    - What I accomplished
    - Key decisions made

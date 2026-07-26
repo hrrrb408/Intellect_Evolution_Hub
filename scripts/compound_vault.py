@@ -488,10 +488,20 @@ def duplicate_raw_pdfs(vault: Path) -> list[dict[str, object]]:
 
 
 PROCESSED_STAGE_ROOTS = {"concepts", "entities", "queries", "mocs", "comparisons"}
-USER_FACING_ROOTS = {"source-summaries", "concepts", "entities", "queries", "mocs", "comparisons"}
+USER_FACING_ROOTS = {"source-summaries", "concepts", "entities", "queries", "mocs", "comparisons", "tasks"}
 USER_FACING_TOP_LEVEL = {"index.md", "log.md"}
 ENGLISH_RE = re.compile(r"[A-Za-z]")
 CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
+TASK_FILES = {
+    "inbox": "tasks/inbox.md",
+    "today": "tasks/today.md",
+    "upcoming": "tasks/upcoming.md",
+    "waiting": "tasks/waiting.md",
+    "done": "tasks/done.md",
+}
+TASK_CONTEXTS = {"computer", "phone", "errands", "reading"}
+TASK_LINE_RE = re.compile(r"^\s*-\s+\[(?P<checked>[ xX])\]\s+(?P<body>.+)$")
+TASK_TOKEN_RE = re.compile(r"\s(?P<key>id|created|due|priority|status|context|project|source):(?P<value>\S+)")
 
 
 def is_user_facing_note(path: str) -> bool:
@@ -818,6 +828,8 @@ def template_status(vault: Path) -> dict[str, object]:
         "entities/engineering/ai-engineering",
         "queries/engineering/ai-engineering",
         "mocs/engineering/ai-engineering",
+        "tasks/projects",
+        "tasks/contexts",
         "wiki/meta",
     ]
     missing_dirs = [path for path in required_dirs if not (vault / path).is_dir()]
@@ -854,6 +866,9 @@ def mark_ieh_template(vault: Path, source: str = "compound-init") -> None:
             "entities/{domain}/{subdomain}",
             "queries/{domain}/{subdomain}",
             "mocs/{domain}/{subdomain}",
+            "tasks/",
+            "tasks/projects/",
+            "tasks/contexts/",
         ],
     })
 
@@ -1716,6 +1731,8 @@ def infer_note_type(vault: Path, path: Path) -> str:
         return "question"
     if r.startswith("mocs/"):
         return "moc"
+    if r.startswith("tasks/"):
+        return "task-list"
     if r.startswith("maintenance/"):
         return "maintenance"
     if r.startswith("wiki/sources/"):
@@ -1948,6 +1965,7 @@ def ensure_scaffold(vault: Path) -> None:
         "entities/engineering/ai-engineering",
         "queries/engineering/ai-engineering",
         "mocs/engineering/ai-engineering",
+        "tasks", "tasks/projects", "tasks/contexts",
         "maintenance",
     ]
     for d in dirs:
@@ -1958,6 +1976,15 @@ def ensure_scaffold(vault: Path) -> None:
         "wiki/hot.md": f"""---\ntitle: Hot Cache\ntype: hot-cache\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\nThis cache is the small recent working set for this vault. Read it first before scanning the full index.\n\n# Hot Cache\n\n{GENERATED_MARKER}\n\nRun `python3 scripts/compound_vault.py hot --vault <vault>` to refresh.\n""",
         "wiki/index.md": f"""---\ntitle: Compound Vault Index\ntype: index\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\nThis generated index maps vault notes by type and path. Read it after `wiki/hot.md`, then open only the relevant notes.\n\n# Compound Vault Index\n\n{GENERATED_MARKER}\n\nRun `python3 scripts/compound_vault.py index --vault <vault>` to refresh.\n""",
         "wiki/meta/lint-report-latest.md": f"""---\ntitle: Latest Vault Health Report\ntype: health-report\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\nThis note points to the latest Compound Vault health findings. Refresh it with `compound_vault.py health` before trusting stale results.\n\n# Latest Vault Health Report\n\nNo report yet.\n""",
+        "tasks/inbox.md": f"""---\ntitle: 待办收件箱 / Task Inbox\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n这是未整理待办的入口。新增任务优先写入这里，再由 review/morning 流程分流到 today、upcoming、waiting、projects 或 contexts。\n\nThis is the default capture point for untriaged tasks. Prefer machine-readable checkbox lines with id/status/priority/context metadata.\n\n# 待办收件箱 / Task Inbox\n\n## 任务 / Tasks\n\n""",
+        "tasks/today.md": f"""---\ntitle: 今日待办 / Today Tasks\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n这是今天应该推进的待办列表。morning cron 可以刷新这页，但不要删除未完成任务。\n\nThis page contains tasks intended for today. Morning automation may refresh context, but must preserve unfinished tasks.\n\n# 今日待办 / Today Tasks\n\n## 任务 / Tasks\n\n""",
+        "tasks/upcoming.md": f"""---\ntitle: 未来待办 / Upcoming Tasks\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n这是有未来日期或暂不适合今天处理的待办列表。\n\nThis page holds scheduled or later tasks that are not today's execution focus.\n\n# 未来待办 / Upcoming Tasks\n\n## 任务 / Tasks\n\n""",
+        "tasks/waiting.md": f"""---\ntitle: 等待中 / Waiting Tasks\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n这是等待他人、等待外部条件或等待材料的待办列表。\n\nThis page holds tasks blocked on another person, external condition, or missing input.\n\n# 等待中 / Waiting Tasks\n\n## 任务 / Tasks\n\n""",
+        "tasks/done.md": f"""---\ntitle: 完成归档 / Done Tasks\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n这是完成任务的归档。完成时保留原始任务 id，并追加 completed 日期。\n\nThis archive keeps completed tasks with stable ids and completion dates.\n\n# 完成归档 / Done Tasks\n\n## 已完成 / Done\n\n""",
+        "tasks/contexts/computer.md": f"""---\ntitle: 电脑上下文 / Computer Context\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n电脑前可完成的任务会汇总到这里。不要把任务原文复制成多个独立真源；如需汇总，保留 id 引用。\n\nUse this context page for work that requires a computer. Avoid duplicate independent source-of-truth task lines unless ids remain stable.\n\n# 电脑上下文 / Computer Context\n\n## 任务 / Tasks\n\n""",
+        "tasks/contexts/phone.md": f"""---\ntitle: 手机上下文 / Phone Context\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n手机上能完成的轻量任务会汇总到这里。\n\nUse this context page for lightweight tasks that can be completed on a phone.\n\n# 手机上下文 / Phone Context\n\n## 任务 / Tasks\n\n""",
+        "tasks/contexts/errands.md": f"""---\ntitle: 外出上下文 / Errands Context\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n外出顺手完成的任务会汇总到这里。\n\nUse this context page for tasks that require being outside or visiting a place.\n\n# 外出上下文 / Errands Context\n\n## 任务 / Tasks\n\n""",
+        "tasks/contexts/reading.md": f"""---\ntitle: 阅读上下文 / Reading Context\ntype: task-list\ncreated: {today()}\nai-first: true\n---\n\n## For future Claude\n阅读、学习、复习类任务会汇总到这里。\n\nUse this context page for reading, study, and review tasks.\n\n# 阅读上下文 / Reading Context\n\n## 任务 / Tasks\n\n""",
     }
     for r, content in files.items():
         p = vault / r
@@ -3102,6 +3129,285 @@ def cmd_query(args: argparse.Namespace) -> int:
     return 0
 
 
+def task_path(vault: Path, name: str) -> Path:
+    return vault / TASK_FILES.get(name, name)
+
+
+def normalize_task_file(value: str) -> str:
+    if value in TASK_FILES:
+        return value
+    value_path = Path(value)
+    if value_path.suffix == ".md":
+        return value_path.as_posix()
+    return value
+
+
+def make_task_id(text: str) -> str:
+    seed = f"{text}|{now().timestamp()}"
+    return f"task-{today().replace('-', '')}-{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:8]}"
+
+
+def parse_task_line(line: str) -> dict[str, object] | None:
+    match = TASK_LINE_RE.match(line)
+    if not match:
+        return None
+    body = match.group("body").strip()
+    meta = {m.group("key"): m.group("value") for m in TASK_TOKEN_RE.finditer(f" {body}")}
+    title = TASK_TOKEN_RE.sub("", f" {body}").strip()
+    status = meta.get("status") or ("done" if match.group("checked").lower() == "x" else "active")
+    return {
+        "checked": match.group("checked").lower() == "x",
+        "title": title,
+        "status": status,
+        "metadata": meta,
+    }
+
+
+def iter_tasks(vault: Path) -> Iterator[dict[str, object]]:
+    tasks_root = vault / "tasks"
+    if not tasks_root.exists():
+        return
+    for path in sorted(tasks_root.rglob("*.md")):
+        text = safe_read(path)
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            parsed = parse_task_line(line)
+            if not parsed:
+                continue
+            metadata = parsed["metadata"]
+            if not isinstance(metadata, dict):
+                metadata = {}
+            yield {
+                "path": rel(vault, path),
+                "line": lineno,
+                "raw": line,
+                "id": metadata.get("id", ""),
+                "title": parsed["title"],
+                "status": parsed["status"],
+                "priority": metadata.get("priority", ""),
+                "due": metadata.get("due", ""),
+                "context": metadata.get("context", ""),
+                "project": metadata.get("project", ""),
+                "source": metadata.get("source", ""),
+                "created": metadata.get("created", ""),
+                "checked": parsed["checked"],
+            }
+
+
+def format_task_line(
+    title: str,
+    task_id: str,
+    *,
+    status: str = "active",
+    priority: str = "medium",
+    context: str = "computer",
+    due: str = "",
+    project: str = "",
+    source: str = "",
+    created: str | None = None,
+    completed: str = "",
+) -> str:
+    checked = "x" if status == "done" else " "
+    tokens = [
+        f"id:{task_id}",
+        f"created:{created or today()}",
+    ]
+    if due:
+        tokens.append(f"due:{due}")
+    tokens += [
+        f"priority:{priority}",
+        f"status:{status}",
+        f"context:{context}",
+    ]
+    if project:
+        tokens.append(f"project:{slugify(project)}")
+    if source:
+        tokens.append(f"source:{source}")
+    if completed:
+        tokens.append(f"completed:{completed}")
+    return f"- [{checked}] {title.strip()} {' '.join(tokens)}"
+
+
+def append_task_to_file(path: Path, line: str) -> None:
+    text = safe_read(path) if path.exists() else ""
+    if "## 任务 / Tasks" in text or "## 已完成 / Done" in text:
+        text = text.rstrip() + "\n" + line + "\n"
+    else:
+        text = text.rstrip() + "\n\n## 任务 / Tasks\n\n" + line + "\n"
+    write_text(path, text)
+
+
+def task_style_issues(vault: Path) -> list[dict[str, object]]:
+    issues: list[dict[str, object]] = []
+    required = list(TASK_FILES.values()) + [f"tasks/contexts/{name}.md" for name in sorted(TASK_CONTEXTS)]
+    for task_file in required:
+        if not (vault / task_file).exists():
+            issues.append({"path": task_file, "line": 0, "issue": "missing required task file"})
+    tasks_root = vault / "tasks"
+    if not tasks_root.exists():
+        return issues
+    for path in sorted(tasks_root.rglob("*.md")):
+        for lineno, line in enumerate(safe_read(path).splitlines(), start=1):
+            if not TASK_LINE_RE.match(line):
+                continue
+            parsed = parse_task_line(line) or {}
+            metadata = parsed.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            missing = sorted({"id", "created", "priority", "status", "context"} - set(metadata))
+            if missing:
+                issues.append({
+                    "path": rel(vault, path),
+                    "line": lineno,
+                    "issue": f"missing task metadata: {', '.join(missing)}",
+                    "text": line[:180],
+                })
+            status = str(metadata.get("status", ""))
+            if status and status not in {"active", "waiting", "done", "cancelled"}:
+                issues.append({
+                    "path": rel(vault, path),
+                    "line": lineno,
+                    "issue": f"invalid status: {status}",
+                    "text": line[:180],
+                })
+            context = str(metadata.get("context", ""))
+            if context and context not in TASK_CONTEXTS and not context.startswith("project-"):
+                issues.append({
+                    "path": rel(vault, path),
+                    "line": lineno,
+                    "issue": f"unknown context: {context}",
+                    "text": line[:180],
+                })
+    return issues
+
+
+def cmd_task(args: argparse.Namespace) -> int:
+    vault = resolve_vault(args.vault)
+    ensure_ieh_scaffold(vault) if args.ensure_ieh else ensure_scaffold(vault)
+    if args.task_cmd == "add":
+        file_key = normalize_task_file(args.file)
+        path = task_path(vault, file_key) if file_key in TASK_FILES else vault / file_key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        status = "waiting" if file_key == "waiting" else "active"
+        task_id = make_task_id(args.text)
+        line = format_task_line(
+            args.text,
+            task_id,
+            status=status,
+            priority=args.priority,
+            context=args.context,
+            due=args.due or "",
+            project=args.project or "",
+            source=args.source or "",
+        )
+        append_task_to_file(path, line)
+        build_index(vault)
+        update_hot(vault)
+        log_event(vault, "task-add", f"{task_id} -> {rel(vault, path)}")
+        payload = {"id": task_id, "path": rel(vault, path), "line": line}
+        print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else f"Added {task_id} -> {rel(vault, path)}")
+        return 0
+
+    if args.task_cmd == "list":
+        items = list(iter_tasks(vault))
+        if args.status != "all":
+            items = [item for item in items if item.get("status") == args.status]
+        if args.context:
+            items = [item for item in items if item.get("context") == args.context]
+        if args.json:
+            print(json.dumps(items, ensure_ascii=False, indent=2))
+        else:
+            for item in items:
+                due = f" due:{item['due']}" if item.get("due") else ""
+                print(f"- {item['id']} [{item['status']}] {item['title']} ({item['path']}:{item['line']}){due}")
+        return 0
+
+    if args.task_cmd == "done":
+        for item in iter_tasks(vault):
+            if item.get("id") != args.task_id:
+                continue
+            src_path = vault / str(item["path"])
+            lines = safe_read(src_path).splitlines()
+            old_line = lines[int(item["line"]) - 1]
+            parsed = parse_task_line(old_line)
+            metadata = parsed.get("metadata", {}) if isinstance(parsed, dict) else {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            done_line = format_task_line(
+                str(item["title"]),
+                args.task_id,
+                status="done",
+                priority=str(metadata.get("priority", item.get("priority") or "medium")),
+                context=str(metadata.get("context", item.get("context") or "computer")),
+                due=str(metadata.get("due", item.get("due") or "")),
+                project=str(metadata.get("project", item.get("project") or "")),
+                source=str(metadata.get("source", item.get("source") or "")),
+                created=str(metadata.get("created", item.get("created") or today())),
+                completed=today(),
+            )
+            if str(item["path"]) != TASK_FILES["done"]:
+                del lines[int(item["line"]) - 1]
+                write_text(src_path, "\n".join(lines).rstrip() + "\n")
+                append_task_to_file(vault / TASK_FILES["done"], done_line)
+            else:
+                lines[int(item["line"]) - 1] = done_line
+                write_text(src_path, "\n".join(lines).rstrip() + "\n")
+            build_index(vault)
+            update_hot(vault)
+            log_event(vault, "task-done", args.task_id)
+            print(json.dumps({"id": args.task_id, "status": "done"}, ensure_ascii=False, indent=2) if args.json else f"Done {args.task_id}")
+            return 0
+        print(f"Task not found: {args.task_id}", file=sys.stderr)
+        return 1
+
+    if args.task_cmd == "review":
+        items = list(iter_tasks(vault))
+        active = [item for item in items if item.get("status") == "active"]
+        waiting = [item for item in items if item.get("status") == "waiting"]
+        done_items = [item for item in items if item.get("status") == "done"]
+        by_context = Counter(str(item.get("context") or "unknown") for item in active)
+        by_priority = Counter(str(item.get("priority") or "unknown") for item in active)
+        payload = {
+            "generated_at": now().strftime(DATETIME_FMT),
+            "active": len(active),
+            "waiting": len(waiting),
+            "done": len(done_items),
+            "by_context": dict(sorted(by_context.items())),
+            "by_priority": dict(sorted(by_priority.items())),
+            "next_active": active[:10],
+        }
+        review_path = vault / "wiki/meta/task-review-latest.md"
+        lines = [
+            "---",
+            "title: Latest Task Review",
+            "type: task-review",
+            f"created: {now().strftime(DATETIME_FMT)}",
+            "ai-first: true",
+            "---",
+            "",
+            "## For future Claude",
+            "This generated task review summarizes the machine-readable `tasks/` layer.",
+            "",
+            "# 最新待办复盘 / Latest Task Review",
+            "",
+            f"- Active: {len(active)}",
+            f"- Waiting: {len(waiting)}",
+            f"- Done: {len(done_items)}",
+            f"- By context: `{json.dumps(payload['by_context'], ensure_ascii=False)}`",
+            f"- By priority: `{json.dumps(payload['by_priority'], ensure_ascii=False)}`",
+            "",
+            "## 下一步候选 / Next Active",
+        ]
+        for item in active[:10]:
+            lines.append(f"- `{item['id']}` {item['title']} (`{item['path']}`)")
+        write_text(review_path, "\n".join(lines).rstrip() + "\n")
+        log_event(vault, "task-review", f"active={len(active)} waiting={len(waiting)} done={len(done_items)}")
+        print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else f"Task review written to {review_path}")
+        return 0
+
+    print(f"Unknown task command: {args.task_cmd}", file=sys.stderr)
+    return 1
+
+
 def build_link_index(vault: Path) -> tuple[dict[str, Path], dict[str, set[str]], dict[str, set[str]]]:
     aliases: dict[str, Path] = {}
     outlinks: dict[str, set[str]] = defaultdict(set)
@@ -3148,7 +3454,7 @@ def health_report(vault: Path) -> dict[str, object]:
                 dead_links.append({"source": src, "link": link})
     orphan_pages = []
     for n in notes:
-        if n.note_type in {"system", "log", "index", "hot-cache", "meta"}:
+        if n.note_type in {"system", "log", "index", "hot-cache", "meta", "task-list"}:
             continue
         if n.path.startswith("wiki/sources/") or n.path.startswith("wiki/meta/"):
             continue
@@ -3198,6 +3504,7 @@ def health_report(vault: Path) -> dict[str, object]:
     missing_distributed = manifest_missing_distributed(vault, manifest)
     missing_audit = missing_audit_artifacts(vault)
     bilingual_issues = bilingual_style_issues(vault)
+    task_issues = task_style_issues(vault)
     git = git_status(vault)
     template = template_status(vault)
     for source_key, item in manifest.get("sources", {}).items():
@@ -3232,6 +3539,7 @@ def health_report(vault: Path) -> dict[str, object]:
         "manifest_missing_distributed": missing_distributed,
         "missing_audit_artifacts": missing_audit,
         "bilingual_style_issues": bilingual_issues,
+        "task_style_issues": task_issues,
         "git": git,
         "template": template,
     }
@@ -3254,6 +3562,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
     manifest_missing_distributed = report.get("manifest_missing_distributed", [])
     missing_audit_artifacts = report.get("missing_audit_artifacts", [])
     bilingual_style_issues = report.get("bilingual_style_issues", [])
+    task_style_issues = report.get("task_style_issues", [])
     git = report.get("git", {})
     template = report.get("template", {})
     lines = [
@@ -3289,6 +3598,7 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
         f"- Manifest missing distributed links: {len(manifest_missing_distributed)}",
         f"- Missing audit artifacts: {len(missing_audit_artifacts)}",
         f"- Bilingual style issues: {len(bilingual_style_issues)}",
+        f"- Task style issues: {len(task_style_issues)}",
         f"- Git repo: `{bool(git.get('is_repo'))}` dirty: `{git.get('dirty')}`",
         f"- IEH template: `{bool(template.get('is_ieh_template'))}` mode: `{template.get('mode')}` missing dirs: `{len(template.get('missing_required_dirs', []))}`",
         f"- Generated staleness hours: `{json.dumps(report['generated_staleness_hours'], ensure_ascii=False)}`",
@@ -3357,6 +3667,15 @@ def write_health_report(vault: Path, report: dict[str, object]) -> Path:
             lines.append(f"- `{item['path']}`")
             for issue in item.get("lines", [])[:8]:
                 lines.append(f"  - line {issue['line']}: {issue['text']}")
+    else:
+        lines.append("None.")
+    lines += ["", "## Task Style Issues", ""]
+    if task_style_issues:
+        for item in task_style_issues[:100]:
+            line_ref = f":{item.get('line')}" if item.get("line") else ""
+            lines.append(f"- `{item.get('path')}{line_ref}` - {item.get('issue')}")
+            if item.get("text"):
+                lines.append(f"  - {item.get('text')}")
     else:
         lines.append("None.")
     lines += ["", "## Git Status", ""]
@@ -4335,6 +4654,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("bilingualize", help="Dry-run or apply Chinese-first bilingual normalization for user-facing IEH notes")
     sp.add_argument("--apply", action="store_true", help="Rewrite user-facing notes. Default is dry-run/audit only.")
     sp.set_defaults(func=cmd_bilingualize)
+
+    sp = sub.add_parser("task", help="Manage IEH task lists under tasks/")
+    sp.add_argument("--no-ensure-ieh", dest="ensure_ieh", action="store_false",
+                    help="Only ensure generic scaffold instead of IEH task scaffold.")
+    sp.set_defaults(ensure_ieh=True)
+    task_sub = sp.add_subparsers(dest="task_cmd", required=True)
+    sp_task_add = task_sub.add_parser("add", help="Append a machine-readable task")
+    sp_task_add.add_argument("text")
+    sp_task_add.add_argument("--file", choices=sorted(TASK_FILES), default="inbox",
+                             help="Target task list. Default: inbox.")
+    sp_task_add.add_argument("--priority", choices=["low", "medium", "high"], default="medium")
+    sp_task_add.add_argument("--context", choices=sorted(TASK_CONTEXTS), default="computer")
+    sp_task_add.add_argument("--due", default="", help="Optional due date, preferably YYYY-MM-DD.")
+    sp_task_add.add_argument("--project", default="", help="Optional project label. Stored as a slug token.")
+    sp_task_add.add_argument("--source", default="", help="Optional source pointer, such as [[note]] or path.")
+    sp_task_add.add_argument("--json", action="store_true")
+    sp_task_list = task_sub.add_parser("list", help="List tasks")
+    sp_task_list.add_argument("--status", choices=["active", "waiting", "done", "cancelled", "all"], default="active")
+    sp_task_list.add_argument("--context", choices=sorted(TASK_CONTEXTS), default="")
+    sp_task_list.add_argument("--json", action="store_true")
+    sp_task_done = task_sub.add_parser("done", help="Move a task into tasks/done.md")
+    sp_task_done.add_argument("task_id")
+    sp_task_done.add_argument("--json", action="store_true")
+    sp_task_review = task_sub.add_parser("review", help="Write wiki/meta/task-review-latest.md")
+    sp_task_review.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_task)
 
     sp = sub.add_parser("chunks", help="Rebuild .vault-meta/chunks and .vault-meta/bm25/index.json")
     sp.add_argument("--json", action="store_true")

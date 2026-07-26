@@ -1,5 +1,5 @@
 ---
-description: Promote an idea fragment into a full project spec with tasks, board entries, and structure
+description: Promote an idea fragment into a full project spec with tasks and structure
 category: thinking
 triggers_en: ["promote idea", "graduate this to project", "make a project from this", "elevate idea"]
 ---
@@ -25,9 +25,9 @@ The optional argument is the idea title, tag, or keyword. If not provided, scan 
    - **Key tasks**: broken into phases with priorities
    - **Open questions**: what still needs answering
    - **Related notes**: links to everything relevant found in step 4
-6. Create board entries:
-   - Add a card to the relevant kanban board in `Backlog` or `This Week`
-   - Add individual task cards if multiple phases
+6. Create IEH task entries:
+   - Add the first execution task with `compound_vault.py task add --project <project-name> --file inbox`
+   - Add individual phase tasks when multiple phases are clear
 7. Update the original idea note:
    - Add `status: graduated` to frontmatter
    - Add a link to the new project note

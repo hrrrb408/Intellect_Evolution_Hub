@@ -20,9 +20,10 @@ Use the obsidian-second-brain skill. Execute `/obsidian-daily`:
      - For meetings with known entities: link to their `[[Person Name]]` pages
    - If no calendar MCP is connected, skip silently (don't error)
 
-5. Pull overdue and due-today tasks from kanban boards:
-   - Scan `boards/` for items with `@{date}` that match today or are past due
-   - Add to the daily note's Focus section with priority markers
+5. Pull active tasks from the IEH task layer:
+   - Run `python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task list --status active --json`
+   - Read `tasks/today.md`, `tasks/upcoming.md`, and `tasks/waiting.md`
+   - Add due-today, overdue, and high-priority items to the daily note's Focus section with priority markers
 
 6. Scan the current conversation for anything relevant to today:
    - Tasks in progress, people mentioned, decisions made, what's being worked on

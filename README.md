@@ -84,7 +84,7 @@
 
 当前能力：
 
-- 59 个平台中立命令，统一从 `commands/` 编译到不同 AI 工具适配层。
+- 63 个平台中立命令，统一从 `commands/` 编译到不同 AI 工具适配层。
 - 支持 Claude Code、Codex CLI、Gemini CLI、OpenCode、Hermes build 输出。
 - 支持 Codex Desktop 面向同一 vault 的 adapter 安装、检查与回滚。
 - 支持 Claude Desktop 通过 MCP、filesystem 或项目说明使用同一 vault protocol。
@@ -94,6 +94,7 @@
 - 支持 source claim extraction、contradiction candidates、timeline/history updater、patch proposal、safe apply。
 - 支持 fusion draft workflow：从 source 生成可审查的中文优先 processed-note 草稿，并安全创建/升级 stage pages。
 - 支持 configurable routing：按 domain/subdomain 自动路由 source、summary、concept、entity、query、MOC。
+- 支持 IEH task layer：`tasks/inbox.md`、`today.md`、`upcoming.md`、`waiting.md`、`done.md`、projects 和 contexts。
 - 支持 Ollama rerank，可用时提升检索排序，不可用时自动退回 lexical/BM25。
 - 支持 manifest repair，修复 runtime 绕过标准 ingest 后留下的账本缺口。
 - 支持 Desktop adapter 检查与回滚，避免长期 drift。
@@ -102,7 +103,7 @@
 
 ```text
 obsidian-second-brain/
-|-- commands/                  # 59 个平台中立命令定义，是命令的唯一源头
+|-- commands/                  # 63 个平台中立命令定义，是命令的唯一源头
 |-- references/                # vault schema、write policy、retrieval、desktop adapter 等规范
 |-- scripts/                   # 核心脚本、build、research、compound vault engine
 |-- scripts/research/          # research/x/youtube/podcast/notebooklm 工具
@@ -185,6 +186,7 @@ IEH/
 - `queries/` 是学习问题、研究问题和判断入口，适合承载综合性理解。
 - `comparisons/` 是多 source 横向比较。
 - `mocs/` 是领域导航，不承载长篇正文。
+- `tasks/` 是行动层，不是知识 source。它保存 inbox、today、upcoming、waiting、done、project tasks 和 context tasks。
 - `maintenance/` 放 vault-wide 维护文档、lint 规则、迁移记录。
 - `wiki/` 是 runtime 层，不是知识内容目录。IEH 模式下只使用 `wiki/hot.md`、`wiki/index.md`、`wiki/log.md` 和 `wiki/meta/`。
 - `wiki/hot.md` 是最近上下文缓存。
@@ -205,6 +207,7 @@ IEH/
 - `comparisons/`
 - `queries/`
 - `mocs/`
+- `tasks/`
 
 规则：
 
@@ -845,6 +848,7 @@ python3 scripts/compound_vault.py --vault /path/to/vault <command> [options]
 | `manifest-repair` | 扫描已有 stage files，补修 manifest |
 | `query` | 运行 hot/index/BM25/rerank 检索 |
 | `health` | 运行 vault health/lint |
+| `task` | 管理 `tasks/` 待办层：add/list/done/review |
 | `chunks` | 重建 chunks 与 BM25 index |
 | `fusion` | 生成或应用 stage-model source fusion |
 | `apply-proposals` | dry-run 或应用安全 patch proposals |
@@ -852,7 +856,7 @@ python3 scripts/compound_vault.py --vault /path/to/vault <command> [options]
 | `routes` | 查看、测试或新增 routing rules |
 | `log` | 向 `wiki/log.md` 追加日志 |
 
-### 59 个 slash commands
+### 63 个 slash commands
 
 Vault：
 
@@ -860,6 +864,9 @@ Vault：
 - `/obsidian-daily`
 - `/obsidian-log`
 - `/obsidian-task`
+- `/obsidian-task-list`
+- `/obsidian-task-done`
+- `/obsidian-task-review`
 - `/obsidian-person`
 - `/obsidian-capture`
 - `/obsidian-find`
@@ -1008,6 +1015,85 @@ URL/link source 会写入 `raw/links/<domain>/<subdomain>/...md`。这个文件�
 本地 Markdown、txt、HTML 等非 URL 文章仍写入 `raw/articles/`。这样微信公众号、网页文章这类来源不用在 `raw/links` 和 `raw/articles` 之间跳来跳去。
 
 如果网页或微信公众号抓取失败，ingest 仍会创建 `raw/links/...` link record，并把 `fetch_status` 标为 `blocked`，等待用户补正文、截图或手动复制文本。
+
+## 待办与行动层
+
+`tasks/` 是 IEH 的行动系统，用来承接日常生活、学习计划、项目推进和等待事项。它和 `raw/` 的区别是：
+
+- `raw/links/` 记录“我从哪里看到这条信息”，包括 URL、抓取状态和抽取正文。
+- `source-summaries/`、`concepts/`、`queries/` 等记录“我理解了什么”。
+- `tasks/` 记录“我接下来要做什么”。
+
+默认结构：
+
+```text
+tasks/
+  inbox.md
+  today.md
+  upcoming.md
+  waiting.md
+  done.md
+  projects/
+    <project>.md
+  contexts/
+    computer.md
+    phone.md
+    errands.md
+    reading.md
+```
+
+新增任务：
+
+```bash
+python3 scripts/compound_vault.py \
+  --vault "$OBSIDIAN_VAULT_PATH" \
+  task add "整理算法设计笔记 / Organize algorithm design notes" \
+  --file today \
+  --priority high \
+  --context reading \
+  --due 2026-07-30
+```
+
+常用参数：
+
+- `--file inbox|today|upcoming|waiting`
+- `--priority low|medium|high`
+- `--context computer|phone|errands|reading`
+- `--due YYYY-MM-DD`
+- `--project <project-name>`
+- `--source <wikilink-or-path>`
+
+查询任务：
+
+```bash
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task list
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task list --status waiting
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task list --context reading --json
+```
+
+完成任务：
+
+```bash
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task done task-20260726-abc12345
+```
+
+完成后任务会从原列表移动到 `tasks/done.md`，保留原始 id，并追加 `completed:YYYY-MM-DD`。
+
+生成复盘：
+
+```bash
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task review
+```
+
+这会写入 `wiki/meta/task-review-latest.md`，供 morning cron、Hermes、Codex Desktop 或 Claude Code 读取。
+
+真实任务行必须是 checkbox，并携带稳定 metadata：
+
+```md
+- [ ] 整理算法设计笔记 / Organize algorithm design notes id:task-20260726-abc12345 created:2026-07-26 due:2026-07-30 priority:high status:active context:reading
+```
+
+`health --json` 会报告缺失 id/status/priority/context 的坏格式任务。不要手工创建没有 metadata 的 checkbox 待办。
 
 ### Manifest repair
 

@@ -24,7 +24,7 @@ Use the obsidian-second-brain skill. Execute `/obsidian-world`:
    - Read `Home.md` or `Dashboard.md` - current top-level priorities
    - Read today's daily note (if it exists) for what's already in progress
    - Read the last 3 daily notes for recent momentum and open threads
-   - Scan active kanban boards for in-progress and overdue items
+   - Run `compound_vault.py task review` and read `wiki/meta/task-review-latest.md` for active, waiting, and completed tasks
    - Check for session digests from previous conversations (look for "End of Day" or "Session Digest" sections)
 
    **L3 - Deep Context (on demand, ~5-20K tokens)**

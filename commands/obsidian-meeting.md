@@ -35,7 +35,8 @@ Steps:
    - If not found: render the plain displayName (or email local-part) and append `(unknown person - run /obsidian-person to add)`.
 
 5. Locate a linked vault task, if any:
-   - Search `wiki/tasks/` (and kanban boards under `boards/`) for any task whose frontmatter contains `calendar-event-id: <this-event-id>`.
+   - Run `python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" task list --status all --json`.
+   - Search the result and `tasks/` files for `calendar-event-id:<this-event-id>` or a matching task title.
    - If found, capture its path and title - the meeting note will backlink to it.
 
 6. Build the meeting note. Path (wiki-style default):
@@ -59,7 +60,7 @@ Steps:
    organizer: "<organizer-email>"
    attendees: ["[[Person Name]]", ...]
    recurrence: "<recurringEventId>"   # only if recurring; otherwise omit
-   linked-task: "[[wiki/tasks/...]]"  # only if a linked task was found in step 5
+   linked-task: "task-YYYYMMDD-xxxxxxxx"  # only if a linked task was found in step 5
    related-projects: []               # fill in by inference; leave empty if unsure
    calendar-source: google-calendar
    tags: [meeting]
