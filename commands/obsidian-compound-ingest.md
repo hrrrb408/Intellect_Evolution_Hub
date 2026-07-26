@@ -31,6 +31,21 @@ If a previous runtime already created stage-model files without this entrypoint,
 run `/obsidian-manifest-repair` as a dry-run, then apply only after reviewing the
 proposed manifest entries.
 
+For sites that require an authenticated browser session, especially WeChat
+Official Account pages, do not overwrite the generated raw note by hand. Save
+the browser-extracted article body to a temporary UTF-8 Markdown file, then run:
+
+```bash
+python3 "$SCRIPT" --vault "$OBSIDIAN_VAULT_PATH" ingest "$URL" \
+  --body-file "/tmp/wechat-article.md" --force
+```
+
+`--body-file` keeps browser extraction inside the manifest-aware transaction:
+the URL stays in `raw/links/`, `content_hash` is computed from the real article
+body, the route is recalculated, and claims/rewrite artifacts are regenerated.
+If direct HTTP retrieval returns a WeChat verification page, the runtime must
+record `fetch_status: blocked`; never synthesize knowledge from that page.
+
 ## Procedure
 
 ```bash

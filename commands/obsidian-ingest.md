@@ -55,6 +55,7 @@ The argument is a URL, file path, or pasted text. If no argument, ask what to in
    Save the image description to `raw/articles/` as a markdown summary with context.
 
    **For articles / webpage URLs** - use WebFetch to pull the page content. In IEH/SINGULARITY vaults, save the URL source as one `raw/links/<domain>/<subdomain>/...md` file containing link metadata, fetch status, diagnostics, and extracted content. Do not duplicate the extracted body into `raw/articles/`.
+   **For WeChat Official Account URLs** - direct HTTP often returns a verification page. Extract the complete visible article with the browser, save it to a temporary UTF-8 Markdown file, and call `compound_vault.py --vault <vault> ingest <URL> --body-file <file> --force`. Never manually overwrite a raw note after ingest; doing so leaves the manifest hash, route, claims, and rewrite plan stale.
    **For PDFs** - read the file directly
    **For pasted text** - use as-is
 

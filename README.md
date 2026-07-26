@@ -705,7 +705,9 @@ mkdir -p ~/.hermes/optional-skills
 cp -R dist/hermes/optional-skills/. ~/.hermes/optional-skills/
 ```
 
-Hook 安装参考：
+Session-end hook 是可选组件，当前默认禁用。日常维护由 morning、nightly、weekly 和 health-check 四个 cron 任务承担；不要在常规安装中注册 `on_session_end`，也不要设置 `OBSIDIAN_HERMES_HOOK_ENABLED`。
+
+只有用户明确决定恢复“每次会话结束即整理”时，才参考下面的安装步骤：
 
 ```bash
 mkdir -p ~/.hermes/agent-hooks
@@ -713,15 +715,13 @@ cp dist/hermes/hooks/obsidian-hermes-session-end.sh ~/.hermes/agent-hooks/
 chmod +x ~/.hermes/agent-hooks/obsidian-hermes-session-end.sh
 ```
 
-必须设置：
+常规安装只需要设置 vault 路径：
 
 ```bash
 export OBSIDIAN_VAULT_PATH="/path/to/IEH"
-export OBSIDIAN_HERMES_HOOK_ENABLED=1
-export OBSIDIAN_HERMES_CONSOLIDATE_CMD="$HOME/.hermes/agent-hooks/obsidian-hermes-consolidate.sh"
 ```
 
-建议同时写入 Hermes 的 `.env` 或 launchd/systemd 配置，让 gateway 进程也能读到这些变量。
+不要给 hook 文件执行权限，也不要在 `cli-config.yaml` 注册 `on_session_end`。以后明确启用时，再单独设置 `OBSIDIAN_HERMES_HOOK_ENABLED=1` 和 consolidation command。
 
 检查：
 
@@ -1015,6 +1015,17 @@ URL/link source 会写入 `raw/links/<domain>/<subdomain>/...md`。这个文件�
 本地 Markdown、txt、HTML 等非 URL 文章仍写入 `raw/articles/`。这样微信公众号、网页文章这类来源不用在 `raw/links` 和 `raw/articles` 之间跳来跳去。
 
 如果网页或微信公众号抓取失败，ingest 仍会创建 `raw/links/...` link record，并把 `fetch_status` 标为 `blocked`，等待用户补正文、截图或手动复制文本。
+
+微信公众号等需要浏览器会话的页面，先把浏览器抽取的完整正文保存为临时 UTF-8 Markdown，再通过同一个 manifest-aware 入口回填：
+
+```bash
+python3 scripts/compound_vault.py --vault "$OBSIDIAN_VAULT_PATH" ingest \
+  "https://mp.weixin.qq.com/s/example" \
+  --body-file "/tmp/wechat-article.md" \
+  --force
+```
+
+不要直接覆盖 `raw/links/` 或 `raw/articles/` 文件。`--body-file` 会用真实正文重新计算哈希、路由、claims、rewrite plan 和 manifest；运行时也会把常见微信验证页识别为 `blocked`，避免从验证页生成错误知识。
 
 ## 待办与行动层
 

@@ -4,6 +4,7 @@ import importlib.util
 import subprocess
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -22,6 +23,29 @@ def load_compound_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_lock_does_not_reclaim_fresh_or_live_owner():
+    module = load_compound_module()
+    with tempfile.TemporaryDirectory() as td:
+        lock_dir = Path(td) / "test.lock"
+        lock_dir.mkdir()
+        assert module.lock_is_stale(lock_dir) is False
+
+        pid_file = lock_dir / "pid"
+        pid_file.write_text(str(module.os.getpid()), encoding="utf-8")
+        old = time.time() - module.LOCK_STALE_SECONDS - 60
+        module.os.utime(pid_file, (old, old))
+        assert module.lock_is_stale(lock_dir) is False
+
+
+def test_lock_reclaims_dead_owner():
+    module = load_compound_module()
+    with tempfile.TemporaryDirectory() as td:
+        lock_dir = Path(td) / "test.lock"
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text("99999999", encoding="utf-8")
+        assert module.lock_is_stale(lock_dir) is True
 
 
 def test_init_ingest_query_health():
@@ -478,7 +502,10 @@ def test_manifest_repair_backfills_distributed_links():
                     "source_format": "pdf",
                     "domain": "engineering",
                     "subdomain": "ai-engineering",
-                    "distributed": {"entities": [], "concepts": []},
+                    "distributed": {
+                        "entities": [],
+                        "concepts": ["concepts/engineering/ai-engineering/deleted-stub.md"],
+                    },
                 }
             },
         }
@@ -617,6 +644,87 @@ def test_url_ingest_writes_extracted_content_into_raw_links():
             assert f"  - {item['source_note']}" in summary.read_text(encoding="utf-8")
     finally:
         cv.read_url = original_read_url
+
+
+def test_wechat_browser_body_file_reingest_and_manifest_reconcile():
+    cv = load_compound_module()
+    original_read_url = cv.read_url
+
+    def verification_page(url, timeout=20, max_bytes=2_000_000):
+        return "<html><body>环境异常，完成验证后即可继续访问</body></html>", "text/html; charset=utf-8"
+
+    cv.read_url = verification_page
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            vault = Path(td) / "vault"
+            body_file = Path(td) / "wechat.md"
+            url = "https://mp.weixin.qq.com/s/example"
+            cv.cmd_init(types.SimpleNamespace(vault=str(vault), template="ieh", limit=20))
+
+            blocked_rc = cv.cmd_ingest(types.SimpleNamespace(
+                vault=str(vault), source=url, body_file=None, max_bytes=2_000_000,
+                hot_limit=20, force=False, distribute=False, rewrite_plan=True,
+                analyze_claims=True,
+            ))
+            assert blocked_rc == 0
+            blocked_note = next((vault / "raw/links").rglob("*.md"))
+            assert "fetch_status: blocked" in blocked_note.read_text(encoding="utf-8")
+
+            body_file.write_text(
+                "---\ntitle: legacy\n---\n\n# Legacy raw note\n\n## Raw Content\n\n"
+                "# PCA与XGBoost信贷风控\n\n完整正文讨论标准化、PCA降维、AUC和模型可解释性。\n",
+                encoding="utf-8",
+            )
+            fetched_rc = cv.cmd_ingest(types.SimpleNamespace(
+                vault=str(vault), source=url, body_file=str(body_file), max_bytes=2_000_000,
+                hot_limit=20, force=True, distribute=False, rewrite_plan=True,
+                analyze_claims=True,
+            ))
+            assert fetched_rc == 0
+
+            manifest = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+            item = manifest["sources"][f"url:{url}"]
+            source_note = vault / item["source_note"]
+            source_text = source_note.read_text(encoding="utf-8")
+            assert item["source_note"].startswith("raw/links/")
+            assert item["fetch_status"] == "fetched"
+            assert item["fetch_method"] == "browser-body-file"
+            assert "完整正文讨论标准化" in source_text
+            assert "环境异常" not in source_text
+            assert "title: legacy" not in source_text
+            assert 'title: "legacy"' in source_text
+            assert item["content_hash"] == cv.raw_link_content_hash(source_text)
+
+            item["content_hash"] = "stale"
+            item["source_summary"] = "source-summaries/wrong/missing.md"
+            cv.save_manifest(vault, manifest)
+            dry = json.loads(run("--vault", str(vault), "manifest-repair", "--json").stdout)
+            assert dry["url_would_reconcile"] == 1
+            applied = json.loads(run("--vault", str(vault), "manifest-repair", "--apply", "--json").stdout)
+            assert applied["url_reconciled"] == 1
+            repaired = json.loads((vault / ".vault-meta/compound-manifest.json").read_text(encoding="utf-8"))
+            repaired_item = repaired["sources"][f"url:{url}"]
+            assert repaired_item["content_hash"] == cv.raw_link_content_hash(source_text)
+            assert repaired_item["source_summary"] != "source-summaries/wrong/missing.md"
+    finally:
+        cv.read_url = original_read_url
+
+
+def test_short_route_keywords_do_not_match_inside_unrelated_words():
+    cv = load_compound_module()
+    domain, subdomain = cv.infer_domain_subdomain(
+        "PCA XGBoost credit model",
+        "A scikit-learn Pipeline standardizes features before PCA and XGBoost.",
+        "https://mp.weixin.qq.com/s/example",
+    )
+    assert (domain, subdomain) == ("engineering", "python")
+
+    domain, subdomain = cv.infer_domain_subdomain(
+        "PCA credit model",
+        "explained_variance_ratio and feature index values are inspected in a Python pipeline",
+        "https://mp.weixin.qq.com/s/example",
+    )
+    assert (domain, subdomain) == ("engineering", "python")
 
 
 def test_ieh_bilingual_style_gate_for_user_facing_notes():

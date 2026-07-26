@@ -34,10 +34,13 @@ dist/hermes/INSTALL.md
 
 ```bash
 export OBSIDIAN_VAULT_PATH="/path/to/vault"
-export OBSIDIAN_HERMES_HOOK_ENABLED=1
 ```
 
-Only set hook variables after reviewing and installing the hook.
+The session-end hook is disabled by default. Do not set
+`OBSIDIAN_HERMES_HOOK_ENABLED` or register `on_session_end` unless the user
+explicitly chooses to re-enable per-session consolidation. The scheduled
+morning, nightly, weekly, and health-check jobs are the default maintenance
+mechanism.
 
 ## Scheduled skills
 
@@ -56,3 +59,20 @@ Do not install unattended writers without user approval.
 - Never delete or archive automatically.
 - Never silently resolve contradictions.
 - Keep generated maintenance reports separate from durable knowledge.
+
+## Browser-only URL ingest
+
+WeChat Official Account pages commonly return a verification page to direct
+HTTP clients. When the browser can read the article, save the complete visible
+body to a temporary UTF-8 Markdown file and run:
+
+```bash
+python3 "$HOME/.hermes/skills/obsidian-second-brain/scripts/compound_vault.py" \
+  --vault "$OBSIDIAN_VAULT_PATH" ingest "$URL" \
+  --body-file "/tmp/wechat-article.md" --force
+```
+
+Never manually overwrite an existing raw note after ingest. The `--body-file`
+entrypoint keeps the body hash, route, source-summary, claims, rewrite plan, and
+manifest synchronized. If the raw note contains a verification page, stop and
+leave it as `fetch_status: blocked` until real article text is available.
